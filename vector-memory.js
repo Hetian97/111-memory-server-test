@@ -231,6 +231,23 @@ class VariableMemoryManager {
       }
     }
 
+    async deleteFragmentFromExternalServer(chat, id) {
+      if (!this.isExternalMemoryEnabled(chat)) return null;
+
+      try {
+        const result = await this.externalMemoryRequest(chat, '/memory/delete', {
+          method: 'POST',
+          body: { id }
+        });
+
+        console.log('[变量记忆] 已从外部 memory-server 删除:', id);
+        return result;
+      } catch (error) {
+        console.warn('[变量记忆] 外部 memory-server 删除失败，已保留本地删除:', error.message);
+        return null;
+      }
+    }
+
 async searchExternalMemoryServer(chat, queryText, topN = 10) {
   if (!this.isExternalMemoryEnabled(chat)) return null;
 
@@ -298,6 +315,13 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
     if (updates.linkedMemories !== undefined) frag.linkedMemories = updates.linkedMemories;
     if (updates.context !== undefined) frag.context = updates.context;
     vm.stats.lastUpdated = Date.now();
+
+    // 实验版：编辑后同步更新外部 memory-server
+    // /memory/add 在 server 端会按 id upsert，所以这里仍然调用 add
+    if (this.isExternalMemoryEnabled(chat)) {
+      this.saveFragmentToExternalServer(chat, frag);
+    }
+
     return true;
   }
 
@@ -309,6 +333,11 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
     });
     vm.stats.totalFragments = vm.fragments.length;
     vm.stats.lastUpdated = Date.now();
+
+    // 实验版：同步删除外部 memory-server
+    if (this.isExternalMemoryEnabled(chat)) {
+      this.deleteFragmentFromExternalServer(chat, id);
+    }
   }
 
   getFragment(chat, id) {
@@ -605,16 +634,32 @@ ${output}`;
   // 批量删除
   batchDelete(chat, selectedItems) {
     const vm = this.getVariableMemory(chat);
+    const deletedIds = [];
+
     for (const item of selectedItems) {
-      // 根据类型删除
       if (item.type === 'fragment') {
+        const exists = vm.fragments.some(f => f.id === item.id);
         vm.fragments = vm.fragments.filter(f => f.id !== item.id);
+        if (exists) deletedIds.push(item.id);
       } else if (item.type === 'core') {
+        const exists = vm.fragments.some(f => f.id === item.id && f.category === 'C');
         vm.fragments = vm.fragments.filter(f => !(f.id === item.id && f.category === 'C'));
+        if (exists) deletedIds.push(item.id);
       }
     }
+
+    vm.fragments.forEach(f => {
+      f.linkedMemories = (f.linkedMemories || []).filter(lid => !deletedIds.includes(lid));
+    });
+
     vm.stats.totalFragments = vm.fragments.length;
     vm.stats.lastUpdated = Date.now();
+
+    // 实验版：批量删除同步到外部 memory-server
+    if (this.isExternalMemoryEnabled(chat)) {
+      deletedIds.forEach(id => this.deleteFragmentFromExternalServer(chat, id));
+    }
+
     return true;
   }
 
