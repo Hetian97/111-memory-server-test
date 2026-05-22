@@ -1,0 +1,4 @@
+memory-server/memory.json
+memory-server/*.db
+memory-server/*.sqlite
+memory-server/*.sqlite3
