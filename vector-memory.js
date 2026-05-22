@@ -21,6 +21,13 @@ class VariableMemoryManager {
     this.embeddingCache = new Map();
     this._embeddingQueue = [];
     this._isProcessingQueue = false;
+
+    // 外部记忆服务器配置（实验版）
+    // 可在浏览器控制台用 localStorage 开关，不破坏原有内置记忆逻辑
+    this.externalMemory = {
+      enabled: localStorage.getItem('vm_external_memory_enabled') === 'true',
+      endpoint: localStorage.getItem('vm_external_memory_endpoint') || 'http://127.0.0.1:8765'
+    };
     
     this.DEFAULT_EXTRACTION_PROMPT = `# 你的任务
 你是"{{角色名}}"。请阅读下面的最新对话记录，提取【值得长期记忆】的增量信息，输出为JSON数组格式。
@@ -170,6 +177,83 @@ class VariableMemoryManager {
     return { ...this.DEFAULT_CATEGORIES, ...(vm._customCategories || {}) };
   }
 
+    isExternalMemoryEnabled(chat) {
+      const vm = this.getVariableMemory(chat);
+      return Boolean(
+        this.externalMemory?.enabled ||
+        vm.settings?.externalMemoryEnabled
+      );
+    }
+
+    getExternalMemoryEndpoint(chat) {
+      const vm = this.getVariableMemory(chat);
+      return (
+        vm.settings?.externalMemoryEndpoint ||
+        this.externalMemory?.endpoint ||
+        'http://127.0.0.1:8765'
+      ).replace(/\/$/, '');
+    }
+
+    async externalMemoryRequest(chat, path, options = {}) {
+      const endpoint = this.getExternalMemoryEndpoint(chat);
+      const url = endpoint + path;
+
+      const response = await fetch(url, {
+        method: options.method || 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(options.headers || {})
+        },
+        body: options.body ? JSON.stringify(options.body) : undefined
+      });
+
+      if (!response.ok) {
+        throw new Error(`External memory server error: ${response.status}`);
+      }
+
+      return await response.json();
+    }
+
+    async saveFragmentToExternalServer(chat, fragment) {
+      if (!this.isExternalMemoryEnabled(chat)) return null;
+
+      try {
+        const result = await this.externalMemoryRequest(chat, '/memory/add', {
+          method: 'POST',
+          body: fragment
+        });
+
+        console.log('[变量记忆] 已同步到外部 memory-server:', result?.memory?.id || fragment.id);
+        return result;
+      } catch (error) {
+        console.warn('[变量记忆] 外部 memory-server 写入失败，已保留内置记忆:', error.message);
+        return null;
+      }
+    }
+
+async searchExternalMemoryServer(chat, queryText, topN = 10) {
+  if (!this.isExternalMemoryEnabled(chat)) return null;
+
+  try {
+    const result = await this.externalMemoryRequest(chat, '/memory/search', {
+      method: 'POST',
+      body: {
+        query: queryText || '',
+        limit: topN || 10
+      }
+    });
+
+    if (!result?.ok || !Array.isArray(result.memories)) {
+      return null;
+    }
+
+    return result.memories;
+  } catch (error) {
+    console.warn('[变量记忆] 外部 memory-server 检索失败，回退到内置检索:', error.message);
+    return null;
+  }
+}
+
   createFragment(chat, data) {
     const vm = this.getVariableMemory(chat);
     const id = 'mem_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
@@ -190,6 +274,12 @@ class VariableMemoryManager {
       context: data.context || ''
     };
     vm.fragments.push(fragment);
+
+    // 实验版：外部 memory-server 镜像写入
+    // 不阻塞原有流程；server 没开也不会影响 111 原本记忆功能
+    if (this.isExternalMemoryEnabled(chat)) {
+      this.saveFragmentToExternalServer(chat, fragment);
+    }
     vm.stats.totalFragments = vm.fragments.length;
     vm.stats.lastUpdated = Date.now();
     return id;
@@ -339,8 +429,23 @@ class VariableMemoryManager {
 
   async retrieveRelevant(chat, queryText, topN = null) {
     const vm = this.getVariableMemory(chat);
-    if (!vm.fragments.length) return [];
     if (!topN) topN = vm.settings.topN || 10;
+
+    // 实验版：如果开启外部 memory-server，优先从外部检索
+    const externalMemories = await this.searchExternalMemoryServer(chat, queryText, topN);
+    if (externalMemories && externalMemories.length > 0) {
+      return externalMemories.map((fragment, index) => {
+        fragment.lastRecalled = Date.now();
+        fragment.recallCount = (fragment.recallCount || 0) + 1;
+        return {
+          fragment,
+          score: 999 - index
+        };
+      });
+    }
+
+    // 外部检索不可用时，回退到原本内置 fragments
+    if (!vm.fragments.length) return [];
     if (vm.settings.retrievalCacheEnabled && vm._retrievalCache) {
       const cache = vm._retrievalCache;
       const cacheAge = (Date.now() - cache.timestamp) / 1000 / 60; 
