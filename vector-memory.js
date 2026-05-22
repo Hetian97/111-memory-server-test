@@ -558,7 +558,7 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
     let output = '';
     const coreStr = this.serializeCoreMemories(chat);
     if (coreStr) output += coreStr + '\n';
-    if (recentMessages && vm.fragments.length > 0) {
+    if (recentMessages && (vm.fragments.length > 0 || this.isExternalMemoryEnabled(chat))) {
       const results = await this.retrieveRelevant(chat, recentMessages);
       const nonCoreResults = results.filter(r => r.fragment.category !== 'C');
       if (nonCoreResults.length > 0) {
