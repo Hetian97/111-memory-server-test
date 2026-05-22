@@ -556,26 +556,52 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
   async serializeForPrompt(chat, recentMessages = '') {
     const vm = this.getVariableMemory(chat);
     let output = '';
+
     const coreStr = this.serializeCoreMemories(chat);
-    if (coreStr) output += coreStr + '\n';
-    if (recentMessages && (vm.fragments.length > 0 || this.isExternalMemoryEnabled(chat))) {
+    if (coreStr) {
+      output += coreStr + '\n';
+    }
+
+    const shouldRetrieve =
+      recentMessages &&
+      (vm.fragments.length > 0 || this.isExternalMemoryEnabled(chat));
+
+    if (shouldRetrieve) {
       const results = await this.retrieveRelevant(chat, recentMessages);
-      const nonCoreResults = results.filter(r => r.fragment.category !== 'C');
+      const nonCoreResults = (results || []).filter(r => r.fragment && r.fragment.category !== 'C');
+
       if (nonCoreResults.length > 0) {
         output += '## 回闪记忆 (根据当前情境唤醒的记忆片段)\n';
-        nonCoreResults.sort((a, b) => a.fragment.memoryTime - b.fragment.memoryTime);
-        const cats = this.getCategories(chat);
+
+        nonCoreResults.sort((a, b) => {
+          const at = Number(a.fragment.memoryTime || a.fragment.createdAt || 0);
+          const bt = Number(b.fragment.memoryTime || b.fragment.createdAt || 0);
+          return at - bt;
+        });
+
         for (const r of nonCoreResults) {
-          const dateStr = new Date(r.fragment.memoryTime).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+          const time = r.fragment.memoryTime || r.fragment.createdAt || Date.now();
+          const dateStr = new Date(time).toLocaleString('zh-CN', {
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit'
+          });
+
           output += `[${dateStr}] ${r.fragment.content}\n`;
         }
+
         output += '\n';
       }
     }
-    if (!output.trim()) output = '(暂无记忆)\n';
+
+    if (!output.trim()) {
+      output = '(暂无记忆)\n';
+    }
+
     return `## 你的变量记忆档案
-[系统强制指令：你必须将以下提取出的记忆作为你真实的过去，并在对话中自然地表现出你记得这些事。]
-${output}`;
+  [系统强制指令：你必须将以下提取出的记忆作为你真实的过去，并在对话中自然地表现出你记得这些事。]
+  ${output}`;
   }
 
   buildExtractionPrompt(chat, formattedHistory, timeRangeStr, dialogueTimeRange) {
