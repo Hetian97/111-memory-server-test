@@ -271,6 +271,40 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
   }
 }
 
+  async loadFragmentsFromExternalServer(chat) {
+    if (!this.isExternalMemoryEnabled(chat)) return null;
+
+    try {
+      const result = await this.externalMemoryRequest(chat, '/memory/list', {
+        method: 'GET'
+      });
+
+      if (!result?.ok || !Array.isArray(result.memories)) {
+        return null;
+      }
+
+      const vm = this.getVariableMemory(chat);
+
+      // 外部存储模式：用 memory-server 的内容覆盖本地 UI 缓存
+      // 注意：这里仍然只作为前端显示缓存，真正数据以 memory-server 为准
+      vm.fragments = result.memories.map(memory => ({
+        ...memory,
+        embedding: null
+      }));
+
+      vm.stats.totalFragments = vm.fragments.length;
+      vm.stats.lastUpdated = Date.now();
+      vm._externalListLoadedAt = Date.now();
+
+      console.log('[变量记忆] 已从外部 memory-server 加载记忆列表:', vm.fragments.length);
+
+      return vm.fragments;
+    } catch (error) {
+      console.warn('[变量记忆] 从外部 memory-server 加载列表失败，继续使用本地缓存:', error.message);
+      return null;
+    }
+  }
+
     makeLocalLightweightFragment(chat, fragment) {
       if (!this.isExternalMemoryEnabled(chat)) {
         return fragment;
@@ -826,6 +860,27 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
 
   renderMemoryUI(chat, container) {
     const vm = this.getVariableMemory(chat);
+
+    // B2-2 实验版：外部记忆开启时，长期记忆 UI 从 memory-server 加载列表
+    // 加一个短缓存，避免 renderMemoryUI 自己触发无限刷新
+    const shouldLoadExternalList =
+      this.isExternalMemoryEnabled(chat) &&
+      !vm._externalListLoading &&
+      (!vm._externalListLoadedAt || Date.now() - vm._externalListLoadedAt > 3000);
+
+    if (shouldLoadExternalList) {
+      vm._externalListLoading = true;
+
+      this.loadFragmentsFromExternalServer(chat)
+        .then(() => {
+          vm._externalListLoading = false;
+          this.renderMemoryUI(chat, container);
+        })
+        .catch(() => {
+          vm._externalListLoading = false;
+        });
+    }
+
     const stats = this.getStats(chat);
     container.innerHTML = '';
 
