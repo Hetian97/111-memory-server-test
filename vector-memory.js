@@ -874,7 +874,10 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
       this.loadFragmentsFromExternalServer(chat)
         .then(() => {
           vm._externalListLoading = false;
-          this.renderMemoryUI(chat, container);
+
+          // 不在这里二次 render，避免重建 DOM 后丢失按钮事件绑定。
+          // 外部列表已写入 vm.fragments；重新打开记忆面板时会自然显示最新列表。
+          console.log('[变量记忆] 外部记忆列表已加载；请重新打开长期记忆面板刷新显示。');
         })
         .catch(() => {
           vm._externalListLoading = false;
