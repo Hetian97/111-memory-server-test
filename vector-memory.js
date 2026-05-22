@@ -271,6 +271,38 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
   }
 }
 
+    makeLocalLightweightFragment(chat, fragment) {
+      if (!this.isExternalMemoryEnabled(chat)) {
+        return fragment;
+      }
+
+      // 外部记忆开启时，本地聊天对象只保留轻量版本
+      // embedding 数组最占备份体积，因此不长期保存在 chat.variableMemory 里
+      return {
+        ...fragment,
+        embedding: null
+      };
+    }
+
+    stripLocalEmbeddings(chat) {
+      const vm = this.getVariableMemory(chat);
+      let count = 0;
+
+      for (const frag of vm.fragments || []) {
+        if (frag.embedding) {
+          frag.embedding = null;
+          count++;
+        }
+      }
+
+      if (count > 0) {
+        vm.stats.lastUpdated = Date.now();
+      }
+
+      console.log(`[变量记忆] 已清理本地 embedding：${count} 条`);
+      return count;
+    }
+
   createFragment(chat, data) {
     const vm = this.getVariableMemory(chat);
     const id = 'mem_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
@@ -290,10 +322,11 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
       source: data.source || 'auto',
       context: data.context || ''
     };
-    vm.fragments.push(fragment);
+    const localFragment = this.makeLocalLightweightFragment(chat, fragment);
+    vm.fragments.push(localFragment);
 
     // 实验版：外部 memory-server 镜像写入
-    // 不阻塞原有流程；server 没开也不会影响 111 原本记忆功能
+    // server 保存完整 fragment；本地聊天对象保存轻量 fragment
     if (this.isExternalMemoryEnabled(chat)) {
       this.saveFragmentToExternalServer(chat, fragment);
     }
