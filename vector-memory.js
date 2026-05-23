@@ -311,6 +311,109 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
     }
   }
 
+  getActiveChatForExternalMemory() {
+    const state = window.state || {};
+    if (state.activeChatId && state.chats && state.chats[state.activeChatId]) {
+      return state.chats[state.activeChatId];
+    }
+
+    const chats = state.chats || {};
+    const firstChatId = Object.keys(chats)[0];
+    return firstChatId ? chats[firstChatId] : null;
+  }
+
+  syncExternalMemorySettingsFromUI(chat) {
+    const vm = this.getVariableMemory(chat);
+
+    const enabledEl = document.getElementById('vm-external-memory-enabled');
+    const endpointEl = document.getElementById('vm-external-memory-endpoint');
+
+    if (enabledEl) {
+      vm.settings.externalMemoryEnabled = enabledEl.checked;
+      localStorage.setItem('vm_external_memory_enabled', enabledEl.checked ? 'true' : 'false');
+    }
+
+    if (endpointEl) {
+      const endpoint = endpointEl.value.trim() || 'http://127.0.0.1:8765';
+      vm.settings.externalMemoryEndpoint = endpoint;
+      localStorage.setItem('vm_external_memory_endpoint', endpoint);
+    }
+
+    return vm.settings;
+  }
+
+  async testExternalMemoryServerFromSettings() {
+    const chat = this.getActiveChatForExternalMemory();
+    const statusEl = document.getElementById('vm-external-memory-status');
+
+    if (!chat) {
+      if (statusEl) statusEl.textContent = '❌ 未找到当前聊天对象';
+      return;
+    }
+
+    const settings = this.syncExternalMemorySettingsFromUI(chat);
+    const endpoint = (settings.externalMemoryEndpoint || 'http://127.0.0.1:8765').replace(/\/$/, '');
+
+    if (statusEl) {
+      statusEl.textContent = '正在测试连接...';
+      statusEl.style.color = '#999';
+    }
+
+    try {
+      const res = await fetch(`${endpoint}/health`);
+      const data = await res.json();
+
+      if (data?.ok) {
+        if (statusEl) {
+          statusEl.textContent = `✅ 连接成功：${data.service || 'memory-server'}`;
+          statusEl.style.color = '#22c55e';
+        }
+      } else {
+        throw new Error('health 返回异常');
+      }
+    } catch (error) {
+      if (statusEl) {
+        statusEl.textContent = `❌ 连接失败：${error.message}`;
+        statusEl.style.color = '#ef4444';
+      }
+    }
+  }
+
+  async reloadExternalMemoryFromSettings() {
+    const chat = this.getActiveChatForExternalMemory();
+    const statusEl = document.getElementById('vm-external-memory-status');
+
+    if (!chat) {
+      if (statusEl) statusEl.textContent = '❌ 未找到当前聊天对象';
+      return;
+    }
+
+    this.syncExternalMemorySettingsFromUI(chat);
+
+    if (statusEl) {
+      statusEl.textContent = '正在从服务器重新加载记忆...';
+      statusEl.style.color = '#999';
+    }
+
+    try {
+      const fragments = await this.loadFragmentsFromExternalServer(chat);
+
+      if (Array.isArray(fragments)) {
+        if (statusEl) {
+          statusEl.textContent = `✅ 已从服务器加载 ${fragments.length} 条记忆。请关闭并重新打开长期记忆面板查看。`;
+          statusEl.style.color = '#22c55e';
+        }
+      } else {
+        throw new Error('服务器没有返回记忆列表');
+      }
+    } catch (error) {
+      if (statusEl) {
+        statusEl.textContent = `❌ 重新加载失败：${error.message}`;
+        statusEl.style.color = '#ef4444';
+      }
+    }
+  }
+
     makeLocalLightweightFragment(chat, fragment) {
       if (!this.isExternalMemoryEnabled(chat)) {
         return fragment;
@@ -1072,8 +1175,8 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
             <input type="text" id="vm-external-memory-endpoint" value="${this._escapeHtml(s.externalMemoryEndpoint || 'http://127.0.0.1:8765')}" placeholder="http://127.0.0.1:8765" class="vm-input-full">
           </div>
           <div style="display:flex; gap:8px; margin-top:8px;">
-            <button id="vm-test-external-memory-btn" class="vm-btn-secondary" style="padding:6px 12px;">测试连接</button>
-            <button id="vm-reload-external-memory-btn" class="vm-btn-secondary" style="padding:6px 12px;">从服务器重新加载</button>
+            <button id="vm-test-external-memory-btn" class="vm-btn-secondary" style="padding:6px 12px;" onclick="window.vectorMemoryManager.testExternalMemoryServerFromSettings()">测试连接</button>
+            <button id="vm-reload-external-memory-btn" class="vm-btn-secondary" style="padding:6px 12px;" onclick="window.vectorMemoryManager.reloadExternalMemoryFromSettings()">从服务器重新加载</button>
           </div>
           <div id="vm-external-memory-status" style="font-size:11px;color:#999;margin-top:6px;"></div>
         </div>
