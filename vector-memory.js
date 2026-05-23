@@ -466,65 +466,6 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
     return removed;
   }
 
-  prepareChatForStorage(chat) {
-    if (!chat || !chat.variableMemory) return chat;
-
-    const externalEnabled =
-      chat.variableMemory?.settings?.externalMemoryEnabled ||
-      localStorage.getItem('vm_external_memory_enabled') === 'true';
-
-    if (!externalEnabled) return chat;
-
-    const cloned =
-      typeof structuredClone === 'function'
-        ? structuredClone(chat)
-        : JSON.parse(JSON.stringify(chat));
-
-    if (cloned.variableMemory?.fragments) {
-      cloned.variableMemory.fragments = cloned.variableMemory.fragments.filter(f => !f._externalCache);
-
-      if (cloned.variableMemory.stats) {
-        cloned.variableMemory.stats.totalFragments = cloned.variableMemory.fragments.length;
-        cloned.variableMemory.stats.lastUpdated = Date.now();
-      }
-    }
-
-    return cloned;
-  }
-
-  installExternalMemoryStorageGuard() {
-    if (this._storageGuardInstalled) return true;
-
-    const tryInstall = () => {
-      const database = window.db || (typeof db !== 'undefined' ? db : null);
-
-      if (!database?.chats?.put) return false;
-      if (database.chats._externalMemoryGuardInstalled) return true;
-
-      const originalPut = database.chats.put.bind(database.chats);
-      const manager = this;
-
-      database.chats.put = function(chat, ...args) {
-        const cleanChat = manager.prepareChatForStorage(chat);
-        return originalPut(cleanChat, ...args);
-      };
-
-      database.chats._externalMemoryGuardInstalled = true;
-      manager._storageGuardInstalled = true;
-
-      console.log('[变量记忆] 已安装外部记忆保存保护：保存聊天前会移除 _externalCache fragments');
-      return true;
-    };
-
-    if (tryInstall()) return true;
-
-    setTimeout(() => tryInstall(), 1000);
-    setTimeout(() => tryInstall(), 3000);
-    setTimeout(() => tryInstall(), 6000);
-
-    return false;
-  }
-
   createFragment(chat, data) {
     const vm = this.getVariableMemory(chat);
     const id = 'mem_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
@@ -1388,4 +1329,3 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
 }
 
 window.vectorMemoryManager = new VariableMemoryManager();
-window.vectorMemoryManager.installExternalMemoryStorageGuard();
