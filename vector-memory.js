@@ -295,6 +295,7 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
       vm.fragments = result.memories.map(memory => ({
         ...memory,
         embedding: null
+	_externalCache: true
       }));
 
       vm.stats.totalFragments = vm.fragments.length;
@@ -444,6 +445,26 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
       console.log(`[变量记忆] 已清理本地 embedding：${count} 条`);
       return count;
     }
+
+  stripExternalCacheFragments(chat) {
+    const vm = this.getVariableMemory(chat);
+
+    if (!this.isExternalMemoryEnabled(chat)) {
+      return 0;
+    }
+
+    const before = vm.fragments.length;
+    vm.fragments = (vm.fragments || []).filter(f => !f._externalCache);
+    const removed = before - vm.fragments.length;
+
+    if (removed > 0) {
+      vm.stats.totalFragments = vm.fragments.length;
+      vm.stats.lastUpdated = Date.now();
+    }
+
+    console.log(`[变量记忆] 已清理外部显示缓存 fragments：${removed} 条`);
+    return removed;
+  }
 
   createFragment(chat, data) {
     const vm = this.getVariableMemory(chat);
