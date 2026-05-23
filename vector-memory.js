@@ -294,7 +294,7 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
       // 注意：这里仍然只作为前端显示缓存，真正数据以 memory-server 为准
       vm.fragments = result.memories.map(memory => ({
         ...memory,
-        embedding: null
+        embedding: null,
 	_externalCache: true
       }));
 
