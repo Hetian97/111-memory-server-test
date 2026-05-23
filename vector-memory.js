@@ -95,7 +95,6 @@ class VariableMemoryManager {
           retrievalCacheInterval: 3,
           autoExtractionMsgInterval: 20,
           lastExtractedMsgIndex: -1,
-          lastExtractedMsgIndex: -1,
           externalMemoryEnabled: localStorage.getItem('vm_external_memory_enabled') === 'true',
           externalMemoryEndpoint: localStorage.getItem('vm_external_memory_endpoint') || 'http://127.0.0.1:8765'
         },
