@@ -53,6 +53,61 @@
   <script src="character-generator.js?v=0.0.36" defer></script>
   <script src="structured-memory.js?v=0.0.36" defer></script>
   <script src="vector-memory.js?v=0.0.36" defer></script>
+
+  <script>
+    // 变量记忆模块兜底加载器：
+    // 如果 Service Worker / 缓存导致 vector-memory.js 没有正确执行，
+    // 这里会自动重新加载一次，避免长期记忆界面显示“变量记忆模块未加载”。
+    (function ensureVectorMemoryManagerLoaded() {
+      let retryCount = 0;
+      const maxRetries = 3;
+
+      function loadAgain() {
+        if (window.vectorMemoryManager) {
+          console.log('[变量记忆] 模块已加载，无需兜底。');
+          return;
+        }
+
+        if (retryCount >= maxRetries) {
+          console.warn('[变量记忆] 兜底加载失败：已达到最大重试次数。');
+          return;
+        }
+
+        retryCount++;
+
+        console.warn('[变量记忆] 检测到模块未加载，正在兜底加载 vector-memory.js，第 ' + retryCount + ' 次');
+
+        const oldScript = document.querySelector('script[src*="vector-memory.js"]');
+        if (oldScript) {
+          oldScript.remove();
+        }
+
+        const script = document.createElement('script');
+        script.src = 'vector-memory.js?v=fallback-' + Date.now();
+        script.onload = function () {
+          if (window.vectorMemoryManager) {
+            console.log('[变量记忆] 兜底加载成功。');
+          } else {
+            setTimeout(loadAgain, 500);
+          }
+        };
+        script.onerror = function () {
+          console.warn('[变量记忆] 兜底加载 vector-memory.js 失败。');
+          setTimeout(loadAgain, 800);
+        };
+
+        document.head.appendChild(script);
+      }
+
+      window.ensureVectorMemoryManagerLoaded = loadAgain;
+
+      window.addEventListener('load', function () {
+        setTimeout(loadAgain, 800);
+        setTimeout(loadAgain, 2000);
+      });
+    })();
+  </script>
+
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
   <!-- 拆分后的模块（按依赖顺序加载） -->
