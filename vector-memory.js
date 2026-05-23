@@ -1173,12 +1173,12 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
           </div>
           <div id="vm-custom-embedding-fields" style="display:${s.useCustomEmbedding ? 'block' : 'none'}; margin-top:8px;">
             <input type="text" id="vm-embedding-endpoint" value="${this._escapeHtml(s.embeddingEndpoint || '')}" placeholder="https://api.openai.com" class="vm-input-full">
-            <input type="password" id="vm-embedding-apikey" value="${this._escapeHtml(s.embeddingApiKey || '')}" placeholder="API Key" class="vm-input-full" style="margin-top:4px;">
+            <input type="text" id="vm-embedding-apikey" value="${this._escapeHtml(s.embeddingApiKey || '')}" placeholder="API Key" class="vm-input-full" style="margin-top:4px;">
             <div style="display:flex; gap:8px; margin-top:4px; position:relative;">
               <input type="text" id="vm-embedding-model" value="${this._escapeHtml(s.embeddingModel || 'text-embedding-3-small')}" placeholder="Model Name" class="vm-input-full" style="flex:1;">
               <button id="vm-fetch-models-btn" class="vm-btn-secondary" style="white-space:nowrap; padding:0 12px;">拉取模型</button>
             </div>
-            <div id="vm-models-list" style="display:none; max-height:200px; overflow-y:auto; background:var(--bg-color,#fff); border:1px solid var(--border-color,#eee); border-radius:8px; margin-top:4px; box-shadow:0 4px 12px rgba(0,0,0,0.1); position:absolute; z-index:100; width:calc(100% - 30px);"></div>
+            <div id="vm-models-list" style="display:none; max-height:260px; overflow-y:auto; background:var(--bg-color,#fff); border:1px solid var(--border-color,#eee); border-radius:8px; margin-top:6px; box-shadow:0 4px 12px rgba(0,0,0,0.1); position:relative; z-index:100; width:100%; box-sizing:border-box;"></div>
           </div>
         </div>
 
