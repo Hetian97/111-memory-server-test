@@ -1329,3 +1329,26 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
 }
 
 window.vectorMemoryManager = new VariableMemoryManager();
+window.cleanExternalMemoryCacheForExport = function(chat) {
+  if (!chat || typeof chat !== 'object') return chat;
+
+  const cloned =
+    typeof structuredClone === 'function'
+      ? structuredClone(chat)
+      : JSON.parse(JSON.stringify(chat));
+
+  if (cloned.variableMemory?.fragments) {
+    cloned.variableMemory.fragments = cloned.variableMemory.fragments.filter(f => !f._externalCache);
+
+    if (cloned.variableMemory.stats) {
+      cloned.variableMemory.stats.totalFragments = cloned.variableMemory.fragments.length;
+    }
+  }
+
+  return cloned;
+};
+
+window.cleanExternalMemoryCacheFromChatsForExport = function(chats) {
+  if (!Array.isArray(chats)) return chats;
+  return chats.map(chat => window.cleanExternalMemoryCacheForExport(chat));
+};

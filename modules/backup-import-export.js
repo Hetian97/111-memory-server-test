@@ -188,7 +188,11 @@
       ]);
 
       // 方案3：导出时移除API历史记录
-      const cleanedChats = removeApiHistoryFromChats(chats);
+      let cleanedChats = removeApiHistoryFromChats(chats);
+
+      if (window.cleanExternalMemoryCacheFromChatsForExport) {
+        cleanedChats = window.cleanExternalMemoryCacheFromChatsForExport(cleanedChats);
+      }
 
       // 导出情侣空间相关的 localStorage 数据
       const coupleSpaceLocalStorage = exportCoupleSpaceLocalStorage();
@@ -1096,6 +1100,10 @@
         // 方案3：导出时移除API历史记录
         if (tableName === 'chats') {
           tableData = removeApiHistoryFromChats(tableData);
+
+          if (window.cleanExternalMemoryCacheFromChatsForExport) {
+            tableData = window.cleanExternalMemoryCacheFromChatsForExport(tableData);
+          }
         }
 
         if (tableData.length === 0) continue;
@@ -1253,9 +1261,19 @@
 
           // 方案3：导出时移除API历史记录
           let recordToWrite = record;
-          if (tableName === 'chats' && record.apiHistory) {
-            recordToWrite = { ...record };
-            delete recordToWrite.apiHistory;
+
+          if (tableName === 'chats') {
+            recordToWrite = window.cleanExternalMemoryCacheForExport
+              ? window.cleanExternalMemoryCacheForExport(record)
+              : (
+                  typeof structuredClone === 'function'
+                    ? structuredClone(record)
+                    : JSON.parse(JSON.stringify(record))
+                );
+
+            if (recordToWrite.apiHistory) {
+              delete recordToWrite.apiHistory;
+            }
           }
 
           writer.write(encoder.encode(JSON.stringify(recordToWrite)));
@@ -1305,6 +1323,10 @@
         // 方案3：导出时移除API历史记录
         if (tableName === 'chats') {
           tableData = removeApiHistoryFromChats(tableData);
+
+          if (window.cleanExternalMemoryCacheFromChatsForExport) {
+            tableData = window.cleanExternalMemoryCacheFromChatsForExport(tableData);
+          }
         }
         
         backupData.data[tableName] = tableData;
@@ -1879,6 +1901,10 @@
           // 导出时移除API历史记录
           if (tableName === 'chats') {
             tableData = removeApiHistoryFromChats(tableData);
+
+            if (window.cleanExternalMemoryCacheFromChatsForExport) {
+              tableData = window.cleanExternalMemoryCacheFromChatsForExport(tableData);
+            }
           }
           
           backupData.data[tableName] = tableData;

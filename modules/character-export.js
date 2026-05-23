@@ -375,7 +375,14 @@
 
     try {
       // 方案3：导出时移除API历史记录
-      const chatDataCopy = { ...chat };
+      const chatDataCopy = window.cleanExternalMemoryCacheForExport
+        ? window.cleanExternalMemoryCacheForExport(chat)
+        : (
+            typeof structuredClone === 'function'
+              ? structuredClone(chat)
+              : JSON.parse(JSON.stringify(chat))
+          );
+
       if (chatDataCopy.apiHistory) {
         delete chatDataCopy.apiHistory;
       }
