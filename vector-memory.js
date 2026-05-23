@@ -94,7 +94,10 @@ class VariableMemoryManager {
           retrievalCacheEnabled: true,
           retrievalCacheInterval: 3,
           autoExtractionMsgInterval: 20,
-          lastExtractedMsgIndex: -1
+          lastExtractedMsgIndex: -1,
+          lastExtractedMsgIndex: -1,
+          externalMemoryEnabled: localStorage.getItem('vm_external_memory_enabled') === 'true',
+          externalMemoryEndpoint: localStorage.getItem('vm_external_memory_endpoint') || 'http://127.0.0.1:8765'
         },
         _customCategories: {},
         stats: { totalFragments: 0, totalRecalls: 0, lastUpdated: 0 },
@@ -108,6 +111,12 @@ class VariableMemoryManager {
     if (vm.settings.lastExtractedMsgIndex === undefined) vm.settings.lastExtractedMsgIndex = -1;
     if (vm.settings.customExtractionPrompt === undefined) vm.settings.customExtractionPrompt = '';
     if (vm.settings.useCustomExtractionPrompt === undefined) vm.settings.useCustomExtractionPrompt = false;
+    if (vm.settings.externalMemoryEnabled === undefined) {
+      vm.settings.externalMemoryEnabled = localStorage.getItem('vm_external_memory_enabled') === 'true';
+    }
+    if (vm.settings.externalMemoryEndpoint === undefined) {
+      vm.settings.externalMemoryEndpoint = localStorage.getItem('vm_external_memory_endpoint') || 'http://127.0.0.1:8765';
+    }
 
     if (chat.vectorMemory && !vm._migrated) {
       this._migrateFromVectorMemory(chat);
@@ -179,10 +188,7 @@ class VariableMemoryManager {
 
     isExternalMemoryEnabled(chat) {
       const vm = this.getVariableMemory(chat);
-      return Boolean(
-        this.externalMemory?.enabled ||
-        vm.settings?.externalMemoryEnabled
-      );
+      return Boolean(vm.settings?.externalMemoryEnabled);
     }
 
     getExternalMemoryEndpoint(chat) {
@@ -1053,6 +1059,25 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
           </div>
         </div>
 
+        <div class="vm-settings-group">
+          <h4>外部记忆服务器</h4>
+          <div class="vm-setting-row">
+            <span>使用外部 memory-server</span>
+            <label class="toggle-switch"><input type="checkbox" id="vm-external-memory-enabled" ${s.externalMemoryEnabled ? 'checked' : ''}><span class="slider"></span></label>
+          </div>
+          <div style="font-size:11px;color:#999;margin-top:4px;">
+            开启后，记忆会同步到本地 memory-server，并优先从外部服务器检索和加载。
+          </div>
+          <div style="margin-top:8px;">
+            <input type="text" id="vm-external-memory-endpoint" value="${this._escapeHtml(s.externalMemoryEndpoint || 'http://127.0.0.1:8765')}" placeholder="http://127.0.0.1:8765" class="vm-input-full">
+          </div>
+          <div style="display:flex; gap:8px; margin-top:8px;">
+            <button id="vm-test-external-memory-btn" class="vm-btn-secondary" style="padding:6px 12px;">测试连接</button>
+            <button id="vm-reload-external-memory-btn" class="vm-btn-secondary" style="padding:6px 12px;">从服务器重新加载</button>
+          </div>
+          <div id="vm-external-memory-status" style="font-size:11px;color:#999;margin-top:6px;"></div>
+        </div>
+
         <button id="vm-save-settings-btn" class="vm-btn-primary" style="width:100%;margin-top:12px;">保存设置</button>
       </div>
     `;
@@ -1077,6 +1102,12 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
     vm.settings.useCustomExtractionPrompt = document.getElementById('vm-use-custom-prompt')?.checked || false;
     vm.settings.customExtractionPrompt = document.getElementById('vm-custom-prompt')?.value || '';
     
+    vm.settings.externalMemoryEnabled = document.getElementById('vm-external-memory-enabled')?.checked || false;
+    vm.settings.externalMemoryEndpoint = document.getElementById('vm-external-memory-endpoint')?.value || 'http://127.0.0.1:8765';
+
+    localStorage.setItem('vm_external_memory_enabled', vm.settings.externalMemoryEnabled ? 'true' : 'false');
+    localStorage.setItem('vm_external_memory_endpoint', vm.settings.externalMemoryEndpoint);
+
     if (vm._retrievalCache) vm._retrievalCache = { query: '', result: null, timestamp: 0, msgCount: 0 };
     
     alert('设置已保存！');
