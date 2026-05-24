@@ -768,26 +768,18 @@ function bindVectorMemoryEvents(chat, container) {
       const content = await showCustomPrompt('添加记忆片段', '输入记忆内容：', '', 'textarea');
       if (!content || !content.trim()) return;
 
-      const categoryOptions = [
-        { text: 'U 用户设定', value: 'U' },
-        { text: 'A 外貌/身体', value: 'A' },
-        { text: 'R 关系发展', value: 'R' },
-        { text: 'E 经历/事件', value: 'E' },
-        { text: 'I 兴趣/偏好', value: 'I' },
-        { text: 'L 生活习惯', value: 'L' },
-        { text: 'P 承诺/约定', value: 'P' },
-        { text: 'T 创伤/禁忌', value: 'T' },
-        { text: 'M 情绪/心理', value: 'M' }
-      ];
+      let category = await showCustomPrompt(
+        '选择记忆分类',
+        '请输入分类代码：\nU 用户设定\nA 外貌/身体\nR 关系发展\nE 经历/事件\nI 兴趣/偏好\nL 生活习惯\nP 承诺/约定\nT 创伤/禁忌\nM 情绪/心理',
+        'E'
+      );
 
-      let category = 'E';
-      if (typeof showChoiceModal === 'function') {
-        category = await showChoiceModal('选择记忆分类', categoryOptions);
-        if (!category) return;
-      } else {
-        category = prompt('请输入分类代码：U/A/R/E/I/L/P/T/M', 'E') || 'E';
-        category = category.trim().toUpperCase();
-        if (!['U', 'A', 'R', 'E', 'I', 'L', 'P', 'T', 'M'].includes(category)) category = 'E';
+      if (!category) return;
+
+      category = category.trim().toUpperCase();
+
+      if (!['U', 'A', 'R', 'E', 'I', 'L', 'P', 'T', 'M'].includes(category)) {
+        category = 'E';
       }
 
       let importanceInput = await showCustomPrompt('设置重要度', '请输入重要度 1-10：', '5');
