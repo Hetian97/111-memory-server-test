@@ -768,19 +768,27 @@ function bindVectorMemoryEvents(chat, container) {
       const content = await showCustomPrompt('添加记忆片段', '输入记忆内容：', '', 'textarea');
       if (!content || !content.trim()) return;
 
-      let category = await showCustomPrompt(
+      let categoryChoice = await showCustomPrompt(
         '选择记忆分类',
-        '请输入分类代码：\nU 用户设定\nA 外貌/身体\nR 关系发展\nE 经历/事件\nI 兴趣/偏好\nL 生活习惯\nP 承诺/约定\nT 创伤/禁忌\nM 情绪/心理',
-        'E'
+        '请输入编号：\n1. U 用户设定\n2. A 外貌/身体\n3. R 关系发展\n4. E 经历/事件\n5. I 兴趣/偏好\n6. L 生活习惯\n7. P 承诺/约定\n8. T 创伤/禁忌\n9. M 情绪/心理',
+        '4'
       );
 
-      if (!category) return;
+      if (!categoryChoice) return;
 
-      category = category.trim().toUpperCase();
+      const categoryMap = {
+        '1': 'U',
+        '2': 'A',
+        '3': 'R',
+        '4': 'E',
+        '5': 'I',
+        '6': 'L',
+        '7': 'P',
+        '8': 'T',
+        '9': 'M'
+      };
 
-      if (!['U', 'A', 'R', 'E', 'I', 'L', 'P', 'T', 'M'].includes(category)) {
-        category = 'E';
-      }
+      let category = categoryMap[String(categoryChoice).trim()] || 'E';
 
       let importanceInput = await showCustomPrompt('设置重要度', '请输入重要度 1-10：', '5');
       let importance = parseInt(importanceInput, 10);
