@@ -4,6 +4,7 @@ const path = require('path');
 
 const PORT = 8765;
 const DB_FILE = path.join(__dirname, 'memory.json');
+const BACKUP_DIR = path.join(__dirname, 'backups');
 
 const VALID_CATEGORIES = ['U', 'A', 'R', 'E', 'I', 'L', 'P', 'T', 'M', 'C'];
 
@@ -33,7 +34,31 @@ function readDb() {
   }
 }
 
+function backupDbFile() {
+  if (!fs.existsSync(DB_FILE)) return;
+
+  try {
+    if (!fs.existsSync(BACKUP_DIR)) {
+      fs.mkdirSync(BACKUP_DIR, { recursive: true });
+    }
+
+    const timestamp = new Date()
+      .toISOString()
+      .replace(/[:.]/g, '-');
+
+    const backupFile = path.join(BACKUP_DIR, `memory-${timestamp}.json`);
+
+    fs.copyFileSync(DB_FILE, backupFile);
+    fs.copyFileSync(DB_FILE, path.join(__dirname, 'memory.backup.json'));
+
+    console.log('[memory-server] 已备份 memory.json:', backupFile);
+  } catch (error) {
+    console.warn('[memory-server] 备份 memory.json 失败，继续写入:', error.message);
+  }
+}
+
 function writeDb(db) {
+  backupDbFile();
   fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), 'utf8');
 }
 
