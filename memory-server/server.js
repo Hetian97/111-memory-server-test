@@ -365,8 +365,8 @@ const server = http.createServer(async (req, res) => {
   });
 });
 
-server.listen(PORT, '127.0.0.1', () => {
-  console.log(`Aion Memory Server running at http://127.0.0.1:${PORT}`);
-  console.log(`Health check: http://127.0.0.1:${PORT}/health`);
-  console.log('Format: 111/2222-compatible memory fragments');
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`Aion Memory Server running at http://0.0.0.0:${PORT}`);
+  console.log(`Local health check: http://127.0.0.1:${PORT}/health`);
+  console.log(`Tailscale access: http://100.81.84.121:${PORT}/health`);
 });
