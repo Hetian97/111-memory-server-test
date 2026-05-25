@@ -1,0 +1,162 @@
+const Database = require('better-sqlite3');
+const path = require('path');
+
+const dbPath = path.join(__dirname, 'memory.db');
+const db = new Database(dbPath);
+
+db.pragma('journal_mode = WAL');
+
+db.exec(`
+CREATE TABLE IF NOT EXISTS memories (
+  id TEXT PRIMARY KEY,
+  chatId TEXT,
+  content TEXT NOT NULL,
+  category TEXT,
+  importance INTEGER DEFAULT 5,
+  emotionalWeight INTEGER DEFAULT 5,
+  tags TEXT,
+  memoryTime TEXT,
+  createdAt TEXT,
+  updatedAt TEXT,
+  lastRecalled TEXT,
+  recallCount INTEGER DEFAULT 0,
+  embedding TEXT,
+  linkedMemories TEXT,
+  source TEXT,
+  context TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_memories_chatId ON memories(chatId);
+CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category);
+CREATE INDEX IF NOT EXISTS idx_memories_importance ON memories(importance);
+CREATE INDEX IF NOT EXISTS idx_memories_memoryTime ON memories(memoryTime);
+`);
+
+function safeJsonStringify(value) {
+  if (value === undefined || value === null) return null;
+  if (typeof value === 'string') return value;
+  return JSON.stringify(value);
+}
+
+function safeJsonParse(value, fallback) {
+  if (value === undefined || value === null || value === '') return fallback;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+
+function normalizeMemory(row) {
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    chatId: row.chatId || null,
+    content: row.content || '',
+    category: row.category || 'E',
+    importance: row.importance ?? 5,
+    emotionalWeight: row.emotionalWeight ?? 5,
+    tags: safeJsonParse(row.tags, []),
+    memoryTime: row.memoryTime,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    lastRecalled: row.lastRecalled ?? 0,
+    recallCount: row.recallCount || 0,
+    embedding: safeJsonParse(row.embedding, null),
+    linkedMemories: safeJsonParse(row.linkedMemories, []),
+    source: row.source || 'external',
+    context: row.context || ''
+  };
+}
+
+function addMemory(memory) {
+  const now = Date.now();
+
+  const item = {
+    id: memory.id || `mem_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    chatId: memory.chatId || null,
+    content: memory.content || '',
+    category: memory.category || 'E',
+    importance: Number(memory.importance ?? 5),
+    emotionalWeight: Number(memory.emotionalWeight ?? 5),
+    tags: safeJsonStringify(memory.tags || []),
+    memoryTime: String(memory.memoryTime ?? now),
+    createdAt: String(memory.createdAt ?? now),
+    updatedAt: String(memory.updatedAt ?? now),
+    lastRecalled: String(memory.lastRecalled ?? 0),
+    recallCount: Number(memory.recallCount || 0),
+    embedding: safeJsonStringify(memory.embedding || null),
+    linkedMemories: safeJsonStringify(memory.linkedMemories || []),
+    source: memory.source ? String(memory.source) : 'external',
+    context: memory.context ? String(memory.context) : ''
+  };
+
+  const stmt = db.prepare(`
+    INSERT OR REPLACE INTO memories (
+      id, chatId, content, category, importance, emotionalWeight,
+      tags, memoryTime, createdAt, updatedAt, lastRecalled,
+      recallCount, embedding, linkedMemories, source, context
+    ) VALUES (
+      @id, @chatId, @content, @category, @importance, @emotionalWeight,
+      @tags, @memoryTime, @createdAt, @updatedAt, @lastRecalled,
+      @recallCount, @embedding, @linkedMemories, @source, @context
+    )
+  `);
+
+  stmt.run(item);
+  return normalizeMemory(db.prepare('SELECT * FROM memories WHERE id = ?').get(item.id));
+}
+
+function listMemories(chatId) {
+  let rows;
+
+  if (chatId) {
+    rows = db.prepare(`
+      SELECT * FROM memories
+      WHERE chatId = ?
+      ORDER BY CAST(memoryTime AS INTEGER) DESC, CAST(createdAt AS INTEGER) DESC
+    `).all(chatId);
+  } else {
+    rows = db.prepare(`
+      SELECT * FROM memories
+      ORDER BY CAST(memoryTime AS INTEGER) DESC, CAST(createdAt AS INTEGER) DESC
+    `).all();
+  }
+
+  return rows.map(normalizeMemory);
+}
+
+function deleteMemory(id) {
+  const result = db.prepare('DELETE FROM memories WHERE id = ?').run(id);
+  return result.changes > 0;
+}
+
+function clearAllMemories() {
+  const result = db.prepare('DELETE FROM memories').run();
+  return result.changes;
+}
+
+function importFromJsonArray(memories) {
+  if (!Array.isArray(memories)) return 0;
+
+  const insertMany = db.transaction((items) => {
+    for (const item of items) {
+      if (item && item.content) {
+        addMemory(item);
+      }
+    }
+  });
+
+  insertMany(memories);
+  return memories.filter(item => item && item.content).length;
+}
+
+module.exports = {
+  db,
+  addMemory,
+  listMemories,
+  deleteMemory,
+  clearAllMemories,
+  importFromJsonArray
+};

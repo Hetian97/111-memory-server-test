@@ -292,11 +292,31 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
 
       // 外部存储模式：用 memory-server 的内容覆盖本地 UI 缓存
       // 注意：这里仍然只作为前端显示缓存，真正数据以 memory-server 为准
-      vm.fragments = result.memories.map(memory => ({
-        ...memory,
-        embedding: memory.embedding || null,
-	_externalCache: true
-      }));
+      vm.fragments = result.memories.map(memory => {
+        const now = Date.now();
+
+        const safeMemoryTime = Number(memory.memoryTime || memory.createdAt || now);
+        const safeCreatedAt = Number(memory.createdAt || memory.memoryTime || now);
+
+        return {
+          ...memory,
+          id: memory.id || ('mem_external_' + now + '_' + Math.random().toString(36).slice(2, 8)),
+          content: memory.content || '',
+          tags: Array.isArray(memory.tags) ? memory.tags : [],
+          category: memory.category || 'E',
+          importance: Number(memory.importance || 5),
+          emotionalWeight: Number(memory.emotionalWeight || 3),
+          createdAt: Number.isFinite(safeCreatedAt) ? safeCreatedAt : now,
+          memoryTime: Number.isFinite(safeMemoryTime) ? safeMemoryTime : now,
+          lastRecalled: Number(memory.lastRecalled || 0),
+          recallCount: Number(memory.recallCount || 0),
+          embedding: Array.isArray(memory.embedding) ? memory.embedding : null,
+          linkedMemories: Array.isArray(memory.linkedMemories) ? memory.linkedMemories : [],
+          source: memory.source || 'external',
+          context: memory.context || '',
+          _externalCache: true
+        };
+      });
 
       vm.stats.totalFragments = vm.fragments.length;
       vm.stats.lastUpdated = Date.now();
@@ -1078,9 +1098,23 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
         const row = document.createElement('div');
         row.className = 'vm-item-row';
         
-        const dateObj = new Date(frag.memoryTime);
-        const tzOffset = dateObj.getTimezoneOffset() * 60000;
-        const localISOTime = (new Date(dateObj - tzOffset)).toISOString().slice(0,16);
+        let rawTime = Number(frag.memoryTime || frag.createdAt || Date.now());
+
+        if (!Number.isFinite(rawTime)) {
+          rawTime = Date.now();
+        }
+
+        const dateObj = new Date(rawTime);
+
+        let localISOTime = '';
+        if (!Number.isNaN(dateObj.getTime())) {
+          const tzOffset = dateObj.getTimezoneOffset() * 60000;
+          localISOTime = new Date(dateObj.getTime() - tzOffset).toISOString().slice(0, 16);
+        } else {
+          const fallbackDate = new Date();
+          const tzOffset = fallbackDate.getTimezoneOffset() * 60000;
+          localISOTime = new Date(fallbackDate.getTime() - tzOffset).toISOString().slice(0, 16);
+        }
 
         row.innerHTML = `
           <div class="vm-item-checkbox vm-batch-element" data-type="fragment" data-id="${frag.id}" style="display: none;"></div>

@@ -1,9 +1,16 @@
 const http = require('http');
-const fs = require('fs');
 const path = require('path');
+const fs = require('fs');
+
+const {
+  db,
+  addMemory,
+  listMemories,
+  deleteMemory,
+  clearAllMemories
+} = require('./db');
 
 const PORT = 8765;
-const DB_FILE = path.join(__dirname, 'memory.json');
 const BACKUP_DIR = path.join(__dirname, 'backups');
 
 const VALID_CATEGORIES = ['U', 'A', 'R', 'E', 'I', 'L', 'P', 'T', 'M', 'C'];
@@ -14,52 +21,6 @@ function now() {
 
 function makeId() {
   return 'mem_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-}
-
-function readDb() {
-  if (!fs.existsSync(DB_FILE)) {
-    return { memories: [] };
-  }
-
-  try {
-    const raw = fs.readFileSync(DB_FILE, 'utf8');
-    const db = JSON.parse(raw);
-    if (!Array.isArray(db.memories)) {
-      return { memories: [] };
-    }
-    return db;
-  } catch (error) {
-    console.warn('Failed to read memory.json, using empty database:', error.message);
-    return { memories: [] };
-  }
-}
-
-function backupDbFile() {
-  if (!fs.existsSync(DB_FILE)) return;
-
-  try {
-    if (!fs.existsSync(BACKUP_DIR)) {
-      fs.mkdirSync(BACKUP_DIR, { recursive: true });
-    }
-
-    const timestamp = new Date()
-      .toISOString()
-      .replace(/[:.]/g, '-');
-
-    const backupFile = path.join(BACKUP_DIR, `memory-${timestamp}.json`);
-
-    fs.copyFileSync(DB_FILE, backupFile);
-    fs.copyFileSync(DB_FILE, path.join(__dirname, 'memory.backup.json'));
-
-    console.log('[memory-server] 已备份 memory.json:', backupFile);
-  } catch (error) {
-    console.warn('[memory-server] 备份 memory.json 失败，继续写入:', error.message);
-  }
-}
-
-function writeDb(db) {
-  backupDbFile();
-  fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), 'utf8');
 }
 
 function sendJson(res, statusCode, data) {
@@ -148,21 +109,19 @@ function normalizeMemoryFragment(body) {
 
   return {
     id: body.id ? String(body.id) : makeId(),
+    chatId: body.chatId ? String(body.chatId) : null,
     content,
     tags: normalizeTags(body.tags),
     category: normalizeCategory(body.category),
     importance: clampNumber(body.importance, 1, 10, 5),
     emotionalWeight: clampNumber(body.emotionalWeight, 1, 10, 3),
 
-    // 111/2222 compatible time fields
     createdAt: body.createdAt ?? timestamp,
     memoryTime: body.memoryTime ?? timestamp,
     lastRecalled: body.lastRecalled ?? 0,
     recallCount: clampNumber(body.recallCount, 0, 999999, 0),
 
-    // embedding can exist, but does not have to exist yet
     embedding: normalizeEmbedding(body.embedding),
-
     linkedMemories: normalizeLinkedMemories(body.linkedMemories),
 
     source: body.source ? String(body.source) : 'external',
@@ -185,7 +144,7 @@ function simpleSearch(memories, query, limit = 20) {
   const safeLimit = clampNumber(limit, 1, 200, 20);
 
   if (!q) {
-    return memories.slice(-safeLimit).reverse();
+    return memories.slice(0, safeLimit);
   }
 
   const terms = q.split(/\s+/).filter(Boolean);
@@ -222,6 +181,28 @@ function getPath(req) {
   }
 }
 
+async function backupSqliteDb() {
+  try {
+    if (!fs.existsSync(BACKUP_DIR)) {
+      fs.mkdirSync(BACKUP_DIR, { recursive: true });
+    }
+
+    const timestamp = new Date()
+      .toISOString()
+      .replace(/[:.]/g, '-');
+
+    const backupFile = path.join(BACKUP_DIR, `memory-${timestamp}.db`);
+    const latestBackupFile = path.join(__dirname, 'memory.backup.db');
+
+    await db.backup(backupFile);
+    await db.backup(latestBackupFile);
+
+    console.log('[memory-server] 已备份 memory.db:', backupFile);
+  } catch (error) {
+    console.warn('[memory-server] 备份 memory.db 失败，继续写入:', error.message);
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   const pathname = getPath(req);
 
@@ -236,22 +217,26 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (pathname === '/health' && req.method === 'GET') {
+    const memories = listMemories();
+
     sendJson(res, 200, {
       ok: true,
       service: 'Aion Memory Server',
       message: 'Memory server is running.',
-      format: '111/2222-compatible'
+      format: '111/2222-compatible-sqlite',
+      storage: 'sqlite',
+      count: memories.length
     });
     return;
   }
 
   if (pathname === '/memory/list' && req.method === 'GET') {
-    const db = readDb();
+    const memories = listMemories();
 
     sendJson(res, 200, {
       ok: true,
-      count: db.memories.length,
-      memories: db.memories
+      count: memories.length,
+      memories
     });
     return;
   }
@@ -261,28 +246,16 @@ const server = http.createServer(async (req, res) => {
       const body = await readRequestBody(req);
       const memory = normalizeMemoryFragment(body);
 
-      const db = readDb();
+      await backupSqliteDb();
 
-      const existingIndex = db.memories.findIndex(item => item.id === memory.id);
-
-      if (existingIndex >= 0) {
-        db.memories[existingIndex] = {
-          ...db.memories[existingIndex],
-          ...memory,
-          updatedAt: now()
-        };
-      } else {
-        db.memories.push({
-          ...memory,
-          updatedAt: now()
-        });
-      }
-
-      writeDb(db);
+      const savedMemory = addMemory({
+        ...memory,
+        updatedAt: now()
+      });
 
       sendJson(res, 200, {
         ok: true,
-        memory: existingIndex >= 0 ? db.memories[existingIndex] : db.memories[db.memories.length - 1]
+        memory: savedMemory
       });
     } catch (error) {
       sendJson(res, 400, {
@@ -297,9 +270,8 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/memory/search' && req.method === 'POST') {
     try {
       const body = await readRequestBody(req);
-      const db = readDb();
-
-      const results = simpleSearch(db.memories, body.query || '', body.limit || 20);
+      const memories = listMemories(body.chatId || null);
+      const results = simpleSearch(memories, body.query || '', body.limit || 20);
 
       sendJson(res, 200, {
         ok: true,
@@ -330,14 +302,13 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      const db = readDb();
-      const before = db.memories.length;
-      db.memories = db.memories.filter(memory => memory.id !== id);
-      writeDb(db);
+      await backupSqliteDb();
+
+      const deleted = deleteMemory(id);
 
       sendJson(res, 200, {
         ok: true,
-        deleted: before - db.memories.length
+        deleted: deleted ? 1 : 0
       });
     } catch (error) {
       sendJson(res, 400, {
@@ -350,10 +321,13 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (pathname === '/memory/clear' && req.method === 'POST') {
-    writeDb({ memories: [] });
+    await backupSqliteDb();
+
+    const deleted = clearAllMemories();
 
     sendJson(res, 200, {
       ok: true,
+      deleted,
       message: 'All memories cleared.'
     });
     return;
@@ -369,4 +343,5 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`Aion Memory Server running at http://0.0.0.0:${PORT}`);
   console.log(`Local health check: http://127.0.0.1:${PORT}/health`);
   console.log(`Tailscale access: http://100.81.84.121:${PORT}/health`);
+  console.log('Storage: SQLite memory.db');
 });
