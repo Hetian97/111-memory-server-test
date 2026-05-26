@@ -131,6 +131,110 @@ function normalizeMemoryFragment(body) {
   };
 }
 
+function tokenizeText(text) {
+  if (!text) return [];
+
+  const raw = String(text).toLowerCase();
+
+  const cnTokens = raw.match(/[\u4e00-\u9fff]{2,5}/g) || [];
+  const enTokens = raw.match(/[a-zA-Z0-9]+/g) || [];
+
+  return [...new Set([...cnTokens, ...enTokens].filter(Boolean))];
+}
+
+function cosineSimilarity(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {
+    return 0;
+  }
+
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
+
+  for (let i = 0; i < a.length; i++) {
+    const x = Number(a[i]);
+    const y = Number(b[i]);
+
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+
+    dot += x * y;
+    normA += x * x;
+    normB += y * y;
+  }
+
+  if (!normA || !normB) return 0;
+
+  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+function keywordScore(query, memory) {
+  const queryText = String(query || '').trim().toLowerCase();
+  if (!queryText) return 0;
+
+  const terms = tokenizeText(queryText);
+  if (terms.length === 0) return 0;
+
+  const text = memoryToSearchText(memory);
+  let score = 0;
+
+  for (const term of terms) {
+    if (text.includes(term)) score += 1;
+  }
+
+  if (memory.content && String(memory.content).toLowerCase().includes(queryText)) {
+    score += 3;
+  }
+
+  return Math.min(1, score / Math.max(1, terms.length + 3));
+}
+
+function safeParseEmbedding(value) {
+  if (!value) return null;
+  if (Array.isArray(value)) return value;
+
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+async function createQueryEmbedding({ endpoint, apiKey, model, input }) {
+  if (!endpoint || !apiKey || !input) return null;
+
+  const base = String(endpoint).replace(/\/$/, '');
+  const url = base.endsWith('/v1/embeddings')
+    ? base
+    : `${base}/v1/embeddings`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      model: model || 'BAAI/bge-m3',
+      input
+    })
+  });
+
+  if (!response.ok) {
+    let errorText = '';
+    try {
+      errorText = await response.text();
+    } catch {}
+
+    throw new Error(`Embedding query failed: HTTP ${response.status}${errorText ? ': ' + errorText.slice(0, 160) : ''}`);
+  }
+
+  const data = await response.json();
+  const embedding = data?.data?.[0]?.embedding;
+
+  return Array.isArray(embedding) && embedding.length > 0 ? embedding : null;
+}
+
 function memoryToSearchText(memory) {
   return [
     memory.content,
@@ -141,38 +245,83 @@ function memoryToSearchText(memory) {
   ].join(' ').toLowerCase();
 }
 
-function simpleSearch(memories, query, limit = 20) {
-  const q = String(query || '').trim().toLowerCase();
+async function simpleSearch(memories, query, limit = 20, options = {}) {
+  const q = String(query || '').trim();
   const safeLimit = clampNumber(limit, 1, 200, 20);
 
   if (!q) {
     return memories.slice(0, safeLimit);
   }
 
-  const terms = q.split(/\s+/).filter(Boolean);
+  let queryEmbedding = null;
+
+  if (options.embedding?.endpoint && options.embedding?.apiKey) {
+    try {
+      queryEmbedding = await createQueryEmbedding({
+        endpoint: options.embedding.endpoint,
+        apiKey: options.embedding.apiKey,
+        model: options.embedding.model,
+        input: q
+      });
+
+      if (queryEmbedding) {
+        console.log('[memory-server] query embedding dim =', queryEmbedding.length);
+      }
+    } catch (error) {
+      console.warn('[memory-server] query embedding failed, fallback to keyword search:', error.message);
+    }
+  }
 
   const scored = memories
     .map(memory => {
-      const text = memoryToSearchText(memory);
-      let score = 0;
+      const memoryEmbedding = safeParseEmbedding(memory.embedding);
 
-      for (const term of terms) {
-        if (text.includes(term)) score += 1;
-      }
+      const vectorScore =
+        queryEmbedding && memoryEmbedding
+          ? cosineSimilarity(queryEmbedding, memoryEmbedding)
+          : 0;
 
-      if (memory.content && memory.content.toLowerCase().includes(q)) {
-        score += 3;
-      }
+      const textScore = keywordScore(q, memory);
 
-      score += (Number(memory.importance) || 0) * 0.05;
-      score += (Number(memory.emotionalWeight) || 0) * 0.03;
+      const importanceScore = (Number(memory.importance) || 0) / 10;
+      const emotionScore = (Number(memory.emotionalWeight) || 0) / 10;
 
-      return { memory, score };
+      const hasVector = vectorScore > 0;
+
+      const totalScore = hasVector
+        ? vectorScore * 0.72 + textScore * 0.16 + importanceScore * 0.08 + emotionScore * 0.04
+        : textScore * 0.78 + importanceScore * 0.16 + emotionScore * 0.06;
+
+      return {
+        memory,
+        score: totalScore,
+        vectorScore,
+        keywordScore: textScore,
+        hasVector
+      };
     })
     .filter(item => item.score > 0)
     .sort((a, b) => b.score - a.score);
 
-  return scored.slice(0, safeLimit).map(item => item.memory);
+  return scored.slice(0, safeLimit).map(item => {
+    const memoryEmbedding = safeParseEmbedding(item.memory.embedding);
+
+    const {
+      embedding,
+      ...memoryWithoutEmbedding
+    } = item.memory;
+
+    return {
+      ...memoryWithoutEmbedding,
+      embedding: memoryEmbedding ? `[hidden:${memoryEmbedding.length}d]` : null,
+      _hasEmbedding: Boolean(memoryEmbedding),
+      _embeddingDim: memoryEmbedding ? memoryEmbedding.length : 0,
+      _searchScore: Number(item.score.toFixed(6)),
+      _vectorScore: Number(item.vectorScore.toFixed(6)),
+      _keywordScore: Number(item.keywordScore.toFixed(6)),
+      _searchMode: item.hasVector ? 'vector+keyword' : 'keyword'
+    };
+  });
 }
 
 function getPath(req) {
@@ -320,13 +469,30 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/memory/search' && req.method === 'POST') {
     try {
       const body = await readRequestBody(req);
-      const memories = listMemories(body.chatId || null);
-      const results = simpleSearch(memories, body.query || '', body.limit || 20);
+
+      const memories = listMemories({
+        chatId: body.chatId || '',
+        category: body.category || '',
+        minImportance: body.minImportance || '',
+        maxImportance: body.maxImportance || '',
+        limit: body.candidateLimit || 1000
+      });
+
+      const embeddingConfig = {
+        endpoint: body.embeddingEndpoint || process.env.EMBEDDING_ENDPOINT || '',
+        apiKey: body.embeddingApiKey || process.env.EMBEDDING_API_KEY || '',
+        model: body.embeddingModel || process.env.EMBEDDING_MODEL || 'BAAI/bge-m3'
+      };
+
+      const results = await simpleSearch(memories, body.query || '', body.limit || 20, {
+        embedding: embeddingConfig
+      });
 
       sendJson(res, 200, {
         ok: true,
         query: body.query || '',
         count: results.length,
+        searchMode: embeddingConfig.endpoint && embeddingConfig.apiKey ? 'semantic-hybrid' : 'keyword-fallback',
         memories: results
       });
     } catch (error) {
