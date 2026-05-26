@@ -137,6 +137,74 @@ function clearAllMemories() {
   return result.changes;
 }
 
+function getMemoryStats() {
+  const total = db.prepare(`
+    SELECT COUNT(*) AS count FROM memories
+  `).get().count;
+
+  const byCategory = db.prepare(`
+    SELECT category, COUNT(*) AS count
+    FROM memories
+    GROUP BY category
+    ORDER BY category
+  `).all();
+
+  const withEmbedding = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM memories
+    WHERE embedding IS NOT NULL
+      AND embedding != ''
+      AND embedding != 'null'
+      AND embedding != '[]'
+  `).get().count;
+
+  const withoutEmbedding = total - withEmbedding;
+
+  const important = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM memories
+    WHERE importance >= 8
+  `).get().count;
+
+  const core = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM memories
+    WHERE category = 'C'
+  `).get().count;
+
+  const latest = db.prepare(`
+    SELECT * FROM memories
+    ORDER BY CAST(createdAt AS INTEGER) DESC
+    LIMIT 1
+  `).get();
+
+  return {
+    total,
+    byCategory,
+    withEmbedding,
+    withoutEmbedding,
+    important,
+    core,
+    latest: normalizeMemory(latest)
+  };
+}
+
+function listUnembeddedMemories(limit = 100) {
+  const safeLimit = Math.min(500, Math.max(1, Number(limit) || 100));
+
+  const rows = db.prepare(`
+    SELECT * FROM memories
+    WHERE embedding IS NULL
+       OR embedding = ''
+       OR embedding = 'null'
+       OR embedding = '[]'
+    ORDER BY importance DESC, CAST(memoryTime AS INTEGER) DESC, CAST(createdAt AS INTEGER) DESC
+    LIMIT ?
+  `).all(safeLimit);
+
+  return rows.map(normalizeMemory);
+}
+
 function importFromJsonArray(memories) {
   if (!Array.isArray(memories)) return 0;
 
@@ -158,5 +226,7 @@ module.exports = {
   listMemories,
   deleteMemory,
   clearAllMemories,
+  getMemoryStats,
+  listUnembeddedMemories,
   importFromJsonArray
 };

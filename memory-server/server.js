@@ -7,7 +7,9 @@ const {
   addMemory,
   listMemories,
   deleteMemory,
-  clearAllMemories
+  clearAllMemories,
+  getMemoryStats,
+  listUnembeddedMemories
 } = require('./db');
 
 const PORT = 8765;
@@ -232,6 +234,30 @@ const server = http.createServer(async (req, res) => {
 
   if (pathname === '/memory/list' && req.method === 'GET') {
     const memories = listMemories();
+
+    sendJson(res, 200, {
+      ok: true,
+      count: memories.length,
+      memories
+    });
+    return;
+  }
+
+  if (pathname === '/memory/stats' && req.method === 'GET') {
+    const stats = getMemoryStats();
+
+    sendJson(res, 200, {
+      ok: true,
+      storage: 'sqlite',
+      stats
+    });
+    return;
+  }
+
+  if (pathname === '/memory/unembedded' && req.method === 'GET') {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const limit = url.searchParams.get('limit') || 100;
+    const memories = listUnembeddedMemories(limit);
 
     sendJson(res, 200, {
       ok: true,
