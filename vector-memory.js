@@ -518,11 +518,18 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
     return id;
   }
 
-  editFragment(chat, id, updates) {
+  async editFragment(chat, id, updates) {
     const vm = this.getVariableMemory(chat);
     const frag = vm.fragments.find(f => f.id === id);
     if (!frag) return false;
-    if (updates.content !== undefined) { frag.content = updates.content; frag.embedding = null; }
+
+    const shouldRefreshEmbedding = updates.content !== undefined;
+
+    if (updates.content !== undefined) {
+      frag.content = String(updates.content || '').trim();
+      frag.embedding = null;
+    }
+
     if (updates.tags !== undefined) frag.tags = updates.tags;
     if (updates.category !== undefined) frag.category = updates.category;
     if (updates.importance !== undefined) frag.importance = updates.importance;
@@ -530,12 +537,29 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
     if (updates.memoryTime !== undefined) frag.memoryTime = updates.memoryTime;
     if (updates.linkedMemories !== undefined) frag.linkedMemories = updates.linkedMemories;
     if (updates.context !== undefined) frag.context = updates.context;
+
+    if (shouldRefreshEmbedding && frag.content) {
+      try {
+        const embedding = await this.getEmbedding(frag.content, chat);
+        frag.embedding = Array.isArray(embedding) && embedding.length > 0 ? embedding : null;
+
+        if (frag.embedding) {
+          console.log('[变量记忆] 编辑后已重新生成 embedding:', frag.id, 'dim=', frag.embedding.length);
+        } else {
+          console.warn('[变量记忆] 编辑后未能生成 embedding，继续保存为 BM25:', frag.id);
+        }
+      } catch (error) {
+        console.warn('[变量记忆] 编辑后重新生成 embedding 失败:', error.message);
+        frag.embedding = null;
+      }
+    }
+
     vm.stats.lastUpdated = Date.now();
 
     // 实验版：编辑后同步更新外部 memory-server
     // /memory/add 在 server 端会按 id upsert，所以这里仍然调用 add
     if (this.isExternalMemoryEnabled(chat)) {
-      this.saveFragmentToExternalServer(chat, frag);
+      await this.saveFragmentToExternalServer(chat, frag);
     }
 
     return true;
@@ -575,16 +599,16 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
     return this.createFragment(chat, { content, category: 'C', importance: 10, tags: ['核心设定'] });
   }
 
-  editCoreMemory(chat, id, newContent) {
-    this.editFragment(chat, id, { content: newContent });
+  async editCoreMemory(chat, id, newContent) {
+    return await this.editFragment(chat, id, { content: newContent });
   }
 
   deleteCoreMemory(chat, id) {
     this.deleteFragment(chat, id);
   }
 
-  pinToCoreMemory(chat, fragmentId) {
-    this.editFragment(chat, fragmentId, { category: 'C', importance: 10 });
+  async pinToCoreMemory(chat, fragmentId) {
+    return await this.editFragment(chat, fragmentId, { category: 'C', importance: 10 });
   }
 
   serializeCoreMemories(chat) {
@@ -1207,11 +1231,18 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
           </div>
           <div id="vm-custom-embedding-fields" style="display:${s.useCustomEmbedding ? 'block' : 'none'}; margin-top:8px;">
             <input type="text" id="vm-embedding-endpoint" value="${this._escapeHtml(s.embeddingEndpoint || '')}" placeholder="https://api.openai.com" class="vm-input-full">
-            <input type="text" id="vm-embedding-apikey" value="${this._escapeHtml(s.embeddingApiKey || '')}" placeholder="API Key" class="vm-input-full" style="margin-top:4px;">
+            <div style="display:flex; gap:8px; margin-top:4px;">
+                <input type="password" id="vm-embedding-apikey" value="${this._escapeHtml(s.embeddingApiKey || '')}" placeholder="API Key" class="vm-input-full" style="flex:1;">
+                <button id="vm-toggle-embedding-key-btn" class="vm-btn-secondary" style="white-space:nowrap; padding:0 12px;" onclick="window.vectorMemoryManager.toggleEmbeddingApiKeyVisibility()">显示</button>
+            </div>
             <div style="display:flex; gap:8px; margin-top:4px; position:relative;">
               <input type="text" id="vm-embedding-model" value="${this._escapeHtml(s.embeddingModel || 'text-embedding-3-small')}" placeholder="Model Name" class="vm-input-full" style="flex:1;">
               <button id="vm-fetch-models-btn" class="vm-btn-secondary" style="white-space:nowrap; padding:0 12px;">拉取模型</button>
             </div>
+            <div style="display:flex; gap:8px; margin-top:6px;">
+              <button id="vm-test-embedding-btn" class="vm-btn-secondary" style="padding:6px 12px;" onclick="window.vectorMemoryManager.testEmbeddingFromSettings()">测试向量化</button>
+            </div>
+            <div id="vm-embedding-test-status" style="font-size:11px;color:#999;margin-top:6px;"></div>
             <div id="vm-models-list" style="display:none; max-height:260px; overflow-y:auto; background:var(--bg-color,#fff); border:1px solid var(--border-color,#eee); border-radius:8px; margin-top:6px; box-shadow:0 4px 12px rgba(0,0,0,0.1); position:relative; z-index:100; width:100%; box-sizing:border-box;"></div>
           </div>
         </div>
@@ -1282,6 +1313,96 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
       if (fieldsDiv) fieldsDiv.style.display = 'block';
     }
     alert('已恢复默认提示词');
+  }
+
+  toggleEmbeddingApiKeyVisibility() {
+    const input = document.getElementById('vm-embedding-apikey');
+    const btn = document.getElementById('vm-toggle-embedding-key-btn');
+
+    if (!input || !btn) return;
+
+    if (input.type === 'password') {
+      input.type = 'text';
+      btn.textContent = '隐藏';
+    } else {
+      input.type = 'password';
+      btn.textContent = '显示';
+    }
+  }
+
+  async testEmbeddingFromSettings() {
+    const statusEl = document.getElementById('vm-embedding-test-status');
+
+    const endpointInput = document.getElementById('vm-embedding-endpoint');
+    const apiKeyInput = document.getElementById('vm-embedding-apikey');
+    const modelInput = document.getElementById('vm-embedding-model');
+
+    const endpoint = (endpointInput?.value || '').trim();
+    const apiKey = (apiKeyInput?.value || '').trim();
+    const model = (modelInput?.value || 'text-embedding-3-small').trim();
+
+    if (statusEl) {
+      statusEl.textContent = '正在测试向量化...';
+      statusEl.style.color = '#999';
+    }
+
+    if (!endpoint) {
+      if (statusEl) {
+        statusEl.textContent = '❌ 测试失败：未填写 Embedding endpoint';
+        statusEl.style.color = '#ef4444';
+      }
+      return;
+    }
+
+    if (!apiKey) {
+      if (statusEl) {
+        statusEl.textContent = '❌ 测试失败：未填写 API Key';
+        statusEl.style.color = '#ef4444';
+      }
+      return;
+    }
+
+    try {
+      const url = endpoint.endsWith('/') ? endpoint + 'v1/embeddings' : endpoint + '/v1/embeddings';
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model,
+          input: '测试向量化是否可用'
+        })
+      });
+
+      if (!response.ok) {
+        let errorText = '';
+        try {
+          errorText = await response.text();
+        } catch {}
+
+        throw new Error(`HTTP ${response.status}${errorText ? '：' + errorText.slice(0, 120) : ''}`);
+      }
+
+      const data = await response.json();
+      const embedding = data?.data?.[0]?.embedding;
+
+      if (!Array.isArray(embedding) || embedding.length === 0) {
+        throw new Error('API 返回中没有有效 embedding');
+      }
+
+      if (statusEl) {
+        statusEl.textContent = `✅ 向量化测试成功，维度：${embedding.length}`;
+        statusEl.style.color = '#22c55e';
+      }
+    } catch (error) {
+      if (statusEl) {
+        statusEl.textContent = `❌ 测试失败：${error.message}`;
+        statusEl.style.color = '#ef4444';
+      }
+    }
   }
 
   async fetchAvailableModels(chat) {
