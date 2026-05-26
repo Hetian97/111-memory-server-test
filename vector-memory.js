@@ -1170,6 +1170,7 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
           </div>
           <div class="vm-item-actions">
             ${code !== 'C' ? `<button class="vm-item-btn vm-pin-btn" data-id="${frag.id}">置顶为核心</button>` : ''}
+            <button class="vm-item-btn vm-detail-frag-btn" data-id="${frag.id}" onclick="window.vectorMemoryManager.showFragmentDetailFromButton(this)">详情</button>
             <button class="vm-item-btn vm-edit-frag-btn" data-id="${frag.id}">改内容</button>
             <button class="vm-item-btn vm-delete-frag-btn" data-id="${frag.id}" style="color:#ff3b30">删</button>
           </div>
@@ -1562,6 +1563,85 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
       </div>
     `;
   }
+
+showFragmentDetailFromButton(button) {
+  const id = button?.dataset?.id;
+  if (!id) return;
+
+  const chat = this.getActiveChatForExternalMemory();
+  if (!chat) {
+    alert('未找到当前聊天对象');
+    return;
+  }
+
+  const fragment = this.getFragment(chat, id);
+  if (!fragment) {
+    alert('未找到这条记忆。可以尝试从服务器重新加载后再查看。');
+    return;
+  }
+
+  this.showFragmentDetail(fragment);
+}
+
+showFragmentDetail(fragment) {
+  const formatTime = (value) => {
+    if (!value) return '无';
+
+    const num = Number(value);
+    const date = Number.isFinite(num) ? new Date(num) : new Date(value);
+
+    if (Number.isNaN(date.getTime())) return String(value);
+
+    return date.toLocaleString('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+  const tags = Array.isArray(fragment.tags) && fragment.tags.length > 0
+    ? fragment.tags.join(', ')
+    : '无';
+
+  const linkedMemories = Array.isArray(fragment.linkedMemories) && fragment.linkedMemories.length > 0
+    ? fragment.linkedMemories.join(', ')
+    : '无';
+
+  const embeddingStatus = fragment.embedding
+    ? `Vector✓ (${fragment.embeddingDim || fragment.embedding.length || '未知'}d)`
+    : 'BM25 / 无 embedding';
+
+  const detailText = [
+    '【记忆详情】',
+    '',
+    `ID：${fragment.id || '无'}`,
+    `内容：${fragment.content || '无'}`,
+    '',
+    `分类：${fragment.category || 'E'}`,
+    `重要度：${fragment.importance ?? '无'}`,
+    `情绪权重：${fragment.emotionalWeight ?? '无'}`,
+    `标签：${tags}`,
+    '',
+    `向量状态：${embeddingStatus}`,
+    `Embedding 模型：${fragment.embeddingModel || '无'}`,
+    `Embedding 维度：${fragment.embeddingDim || 0}`,
+    `Embedding 更新时间：${formatTime(fragment.embeddingUpdatedAt)}`,
+    '',
+    `发生时间 memoryTime：${formatTime(fragment.memoryTime)}`,
+    `创建时间 createdAt：${formatTime(fragment.createdAt)}`,
+    `更新时间 updatedAt：${formatTime(fragment.updatedAt)}`,
+    `最后召回 lastRecalled：${formatTime(fragment.lastRecalled)}`,
+    `召回次数 recallCount：${fragment.recallCount || 0}`,
+    '',
+    `来源 source：${fragment.source || '无'}`,
+    `上下文 context：${fragment.context || '无'}`,
+    `关联记忆 linkedMemories：${linkedMemories}`
+  ].join('\n');
+
+  alert(detailText);
+}
 
   _escapeHtml(text) {
     if (!text) return '';
