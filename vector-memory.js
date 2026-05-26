@@ -1051,6 +1051,14 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
   renderMemoryUI(chat, container) {
     const vm = this.getVariableMemory(chat);
 
+    if (!vm.uiFilters) {
+      vm.uiFilters = {
+        category: 'ALL',
+        vectorStatus: 'ALL',
+        minImportance: 'ALL'
+      };
+    }
+
     // B2-2 实验版：外部记忆开启时，长期记忆 UI 从 memory-server 加载列表
     // 加一个短缓存，避免 renderMemoryUI 自己触发无限刷新
     const shouldLoadExternalList =
@@ -1110,13 +1118,18 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
 
     const listContainer = document.createElement('div');
     listContainer.className = 'vm-list-container';
-    
+
+    const filterBar = this.renderMemoryFilterBar(chat, vm);
+    container.appendChild(filterBar);
+
+    const filteredFragments = this.getFilteredFragments(vm.fragments || [], vm.uiFilters);
+
     const categories = this.getCategories(chat);
-    
+
     for (const [code, catInfo] of Object.entries(categories)) {
-      const frags = vm.fragments.filter(f => f.category === code);
+      const frags = filteredFragments.filter(f => f.category === code);
       if (frags.length === 0) continue;
-      
+
       frags.sort((a, b) => b.memoryTime - a.memoryTime);
 
       const section = document.createElement('div');
@@ -1181,13 +1194,19 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
       listContainer.appendChild(section);
     }
 
-    if (vm.fragments.length === 0) {
+    if (filteredFragments.length === 0) {
+      const hasAnyMemory = (vm.fragments || []).length > 0;
+
       listContainer.innerHTML = `
         <div style="text-align:center; color: #999; padding: 40px 20px;">
           <div style="font-size:40px; margin-bottom:10px;"></div>
-          <p style="font-size: 16px; font-weight:bold; color:#666;">变量记忆是空的</p>
-          <p style="font-size: 13px; margin-top: 5px;">继续聊天，当新消息达到 ${stats.autoInterval} 条时，系统会自动提取记忆。</p>
-          <p style="font-size: 13px;">你也可以手动点击上方按钮添加。</p>
+          <p style="font-size: 16px; font-weight:bold; color:#666;">
+            ${hasAnyMemory ? '当前筛选条件下没有记忆' : '变量记忆是空的'}
+          </p>
+          <p style="font-size: 13px; margin-top: 5px;">
+            ${hasAnyMemory ? '可以调整分类、向量状态或重要度筛选。' : `继续聊天，当新消息达到 ${stats.autoInterval} 条时，系统会自动提取记忆。`}
+          </p>
+          ${hasAnyMemory ? '' : '<p style="font-size: 13px;">你也可以手动点击上方按钮添加。</p>'}
         </div>
       `;
     }
@@ -1493,6 +1512,149 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
       </div>
     `;
   }
+
+getFilteredFragments(fragments, filters) {
+  const category = filters?.category || 'ALL';
+  const vectorStatus = filters?.vectorStatus || 'ALL';
+  const minImportance = filters?.minImportance || 'ALL';
+
+  return (fragments || []).filter(fragment => {
+    if (category !== 'ALL' && fragment.category !== category) {
+      return false;
+    }
+
+    if (vectorStatus === 'VECTOR' && !fragment.embedding) {
+      return false;
+    }
+
+    if (vectorStatus === 'BM25' && fragment.embedding) {
+      return false;
+    }
+
+    if (minImportance !== 'ALL') {
+      const min = Number(minImportance);
+      const importance = Number(fragment.importance || 0);
+
+      if (Number.isFinite(min) && importance < min) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+}
+
+renderMemoryFilterBar(chat, vm) {
+  const filters = vm.uiFilters || {
+    category: 'ALL',
+    vectorStatus: 'ALL',
+    minImportance: 'ALL'
+  };
+
+  const categories = this.getCategories(chat);
+
+  const categoryOptions = Object.entries(categories)
+    .map(([code, catInfo]) => {
+      const selected = filters.category === code ? 'selected' : '';
+      const name = catInfo?.name || code;
+      return `<option value="${code}" ${selected}>${code} ${this._escapeHtml(name)}</option>`;
+    })
+    .join('');
+
+  const wrap = document.createElement('div');
+  wrap.className = 'vm-filter-bar';
+  wrap.style.cssText = `
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+    align-items:center;
+    padding:10px 12px;
+    margin:8px 0 10px 0;
+    border-radius:12px;
+    background:rgba(0,0,0,0.04);
+  `;
+
+  wrap.innerHTML = `
+    <label style="font-size:12px;color:#666;">分类</label>
+    <select id="vm-filter-category" class="vm-filter-select" style="padding:5px 8px;border-radius:8px;border:1px solid #ddd;">
+      <option value="ALL" ${filters.category === 'ALL' ? 'selected' : ''}>全部</option>
+      ${categoryOptions}
+    </select>
+
+    <label style="font-size:12px;color:#666;">向量</label>
+    <select id="vm-filter-vector" class="vm-filter-select" style="padding:5px 8px;border-radius:8px;border:1px solid #ddd;">
+      <option value="ALL" ${filters.vectorStatus === 'ALL' ? 'selected' : ''}>全部</option>
+      <option value="VECTOR" ${filters.vectorStatus === 'VECTOR' ? 'selected' : ''}>Vector✓</option>
+      <option value="BM25" ${filters.vectorStatus === 'BM25' ? 'selected' : ''}>BM25</option>
+    </select>
+
+    <label style="font-size:12px;color:#666;">重要度</label>
+    <select id="vm-filter-importance" class="vm-filter-select" style="padding:5px 8px;border-radius:8px;border:1px solid #ddd;">
+      <option value="ALL" ${filters.minImportance === 'ALL' ? 'selected' : ''}>全部</option>
+      <option value="1" ${filters.minImportance === '1' ? 'selected' : ''}>≥1</option>
+      <option value="2" ${filters.minImportance === '2' ? 'selected' : ''}>≥2</option>
+      <option value="3" ${filters.minImportance === '3' ? 'selected' : ''}>≥3</option>
+      <option value="4" ${filters.minImportance === '4' ? 'selected' : ''}>≥4</option>
+      <option value="5" ${filters.minImportance === '5' ? 'selected' : ''}>≥5</option>
+      <option value="6" ${filters.minImportance === '6' ? 'selected' : ''}>≥6</option>
+      <option value="7" ${filters.minImportance === '7' ? 'selected' : ''}>≥7</option>
+      <option value="8" ${filters.minImportance === '8' ? 'selected' : ''}>≥8</option>
+      <option value="9" ${filters.minImportance === '9' ? 'selected' : ''}>≥9</option>
+      <option value="10" ${filters.minImportance === '10' ? 'selected' : ''}>10</option>
+    </select>
+
+    <button id="vm-filter-reset" class="vm-btn-secondary" style="padding:5px 10px;">重置</button>
+  `;
+
+  wrap.querySelector('#vm-filter-category')?.addEventListener('change', (e) => {
+    this.updateMemoryFilters(chat, { category: e.target.value }, wrap.parentElement);
+  });
+
+  wrap.querySelector('#vm-filter-vector')?.addEventListener('change', (e) => {
+    this.updateMemoryFilters(chat, { vectorStatus: e.target.value }, wrap.parentElement);
+  });
+
+  wrap.querySelector('#vm-filter-importance')?.addEventListener('change', (e) => {
+    this.updateMemoryFilters(chat, { minImportance: e.target.value }, wrap.parentElement);
+  });
+
+  wrap.querySelector('#vm-filter-reset')?.addEventListener('click', () => {
+    this.updateMemoryFilters(chat, {
+      category: 'ALL',
+      vectorStatus: 'ALL',
+      minImportance: 'ALL'
+    }, wrap.parentElement);
+  });
+
+  return wrap;
+}
+
+updateMemoryFilters(chat, patch, container = null) {
+  const vm = this.getVariableMemory(chat);
+
+  vm.uiFilters = {
+    ...(vm.uiFilters || {
+      category: 'ALL',
+      vectorStatus: 'ALL',
+      minImportance: 'ALL'
+    }),
+    ...patch
+  };
+
+  if (container) {
+    this.renderMemoryUI(chat, container);
+    return;
+  }
+
+  const panel =
+    document.querySelector('.vm-panel-content') ||
+    document.querySelector('.vm-content') ||
+    document.querySelector('.vm-container');
+
+  if (panel) {
+    this.renderMemoryUI(chat, panel);
+  }
+}
 
   renderTagChips(tags, maxVisible = 3) {
     if (!Array.isArray(tags) || tags.length === 0) return '';
