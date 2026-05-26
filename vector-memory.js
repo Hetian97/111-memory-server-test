@@ -1161,6 +1161,7 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
           <div class="vm-item-checkbox vm-batch-element" data-type="fragment" data-id="${frag.id}" style="display: none;"></div>
           <div class="vm-item-main">
             <span class="vm-item-content">${this._escapeHtml(frag.content)}</span>
+            ${this.renderTagChips(frag.tags)}
             <div class="vm-item-meta">
               <input type="datetime-local" class="vm-time-picker" data-id="${frag.id}" value="${localISOTime}" title="修改记忆发生时间">
               <span class="vm-meta-tag">重要度:${frag.importance}</span>
@@ -1488,6 +1489,76 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
           <div class="vm-guide-card-title">自定义提取提示词</div>
           <p>在设置面板中自定义 AI 提取记忆时的提示词。支持变量：{{角色名}}、{{用户昵称}}、{{对话记录}}。</p>
         </div>
+      </div>
+    `;
+  }
+
+  renderTagChips(tags, maxVisible = 3) {
+    if (!Array.isArray(tags) || tags.length === 0) return '';
+
+    const cleanedTags = tags
+      .map(tag => String(tag || '').trim())
+      .filter(Boolean);
+
+    if (cleanedTags.length === 0) return '';
+
+    const visibleTags = cleanedTags.slice(0, maxVisible);
+    const hiddenCount = cleanedTags.length - visibleTags.length;
+
+    const tagHtml = visibleTags
+      .map(tag => `
+        <span
+          class="vm-tag-chip"
+          style="
+            display:inline-flex;
+            align-items:center;
+            max-width:120px;
+            padding:2px 7px;
+            border-radius:999px;
+            font-size:11px;
+            line-height:1.4;
+            color:#666;
+            background:rgba(0,0,0,0.06);
+            white-space:nowrap;
+            overflow:hidden;
+            text-overflow:ellipsis;
+          "
+        >#${this._escapeHtml(tag)}</span>
+      `)
+      .join('');
+
+    const moreHtml = hiddenCount > 0
+      ? `
+        <span
+          class="vm-tag-chip vm-tag-chip-more"
+          style="
+            display:inline-flex;
+            align-items:center;
+            padding:2px 7px;
+            border-radius:999px;
+            font-size:11px;
+            line-height:1.4;
+            color:#999;
+            background:rgba(0,0,0,0.04);
+            white-space:nowrap;
+          "
+        >+${hiddenCount}</span>
+      `
+      : '';
+
+    return `
+      <div
+        class="vm-tag-row"
+        style="
+          display:flex;
+          flex-wrap:wrap;
+          gap:4px;
+          margin-top:6px;
+          margin-bottom:4px;
+        "
+      >
+        ${tagHtml}
+        ${moreHtml}
       </div>
     `;
   }
