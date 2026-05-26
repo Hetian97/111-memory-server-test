@@ -544,7 +544,24 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
         frag.embedding = Array.isArray(embedding) && embedding.length > 0 ? embedding : null;
 
         if (frag.embedding) {
-          console.log('[变量记忆] 编辑后已重新生成 embedding:', frag.id, 'dim=', frag.embedding.length);
+          const vm = this.getVariableMemory(chat);
+
+          frag.embeddingModel =
+            document.getElementById('vm-embedding-model')?.value ||
+            vm.settings?.embeddingModel ||
+            'BAAI/bge-m3';
+
+          frag.embeddingDim = frag.embedding.length;
+          frag.embeddingUpdatedAt = Date.now();
+
+          console.log(
+            '[变量记忆] 编辑后已重新生成 embedding:',
+            frag.id,
+            'dim=',
+            frag.embedding.length,
+            'model=',
+            frag.embeddingModel
+          );
         } else {
           console.warn('[变量记忆] 编辑后未能生成 embedding，继续保存为 BM25:', frag.id);
         }

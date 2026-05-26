@@ -70,12 +70,24 @@ async function createEmbedding(text) {
 }
 
 function updateEmbedding(id, embedding) {
+  const timestamp = String(Date.now());
+
   db.prepare(`
     UPDATE memories
     SET embedding = ?,
+        embeddingModel = ?,
+        embeddingDim = ?,
+        embeddingUpdatedAt = ?,
         updatedAt = ?
     WHERE id = ?
-  `).run(JSON.stringify(embedding), String(Date.now()), id);
+  `).run(
+    JSON.stringify(embedding),
+    MODEL,
+    embedding.length,
+    timestamp,
+    timestamp,
+    id
+  );
 }
 
 async function main() {

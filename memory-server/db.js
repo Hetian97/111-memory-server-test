@@ -21,6 +21,9 @@ CREATE TABLE IF NOT EXISTS memories (
   lastRecalled TEXT,
   recallCount INTEGER DEFAULT 0,
   embedding TEXT,
+  embeddingModel TEXT,
+  embeddingDim INTEGER DEFAULT 0,
+  embeddingUpdatedAt TEXT,
   linkedMemories TEXT,
   source TEXT,
   context TEXT
@@ -31,6 +34,20 @@ CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category);
 CREATE INDEX IF NOT EXISTS idx_memories_importance ON memories(importance);
 CREATE INDEX IF NOT EXISTS idx_memories_memoryTime ON memories(memoryTime);
 `);
+
+function ensureColumn(table, column, definition) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all();
+  const exists = columns.some(col => col.name === column);
+
+  if (!exists) {
+    db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`).run();
+    console.log(`[memory-server] Added column ${column} to ${table}`);
+  }
+}
+
+ensureColumn('memories', 'embeddingModel', 'TEXT');
+ensureColumn('memories', 'embeddingDim', 'INTEGER DEFAULT 0');
+ensureColumn('memories', 'embeddingUpdatedAt', 'TEXT');
 
 function safeJsonStringify(value) {
   if (value === undefined || value === null) return null;
@@ -64,6 +81,9 @@ function normalizeMemory(row) {
     lastRecalled: row.lastRecalled ?? 0,
     recallCount: row.recallCount || 0,
     embedding: safeJsonParse(row.embedding, null),
+    embeddingModel: row.embeddingModel || '',
+    embeddingDim: Number(row.embeddingDim || 0),
+    embeddingUpdatedAt: row.embeddingUpdatedAt || '',
     linkedMemories: safeJsonParse(row.linkedMemories, []),
     source: row.source || 'external',
     context: row.context || ''
@@ -87,6 +107,9 @@ function addMemory(memory) {
     lastRecalled: String(memory.lastRecalled ?? 0),
     recallCount: Number(memory.recallCount || 0),
     embedding: safeJsonStringify(memory.embedding || null),
+    embeddingModel: memory.embeddingModel ? String(memory.embeddingModel) : '',
+    embeddingDim: Number(memory.embeddingDim || (Array.isArray(memory.embedding) ? memory.embedding.length : 0)),
+    embeddingUpdatedAt: memory.embeddingUpdatedAt ? String(memory.embeddingUpdatedAt) : (memory.embedding ? String(Date.now()) : ''),
     linkedMemories: safeJsonStringify(memory.linkedMemories || []),
     source: memory.source ? String(memory.source) : 'external',
     context: memory.context ? String(memory.context) : ''
@@ -96,11 +119,13 @@ function addMemory(memory) {
     INSERT OR REPLACE INTO memories (
       id, chatId, content, category, importance, emotionalWeight,
       tags, memoryTime, createdAt, updatedAt, lastRecalled,
-      recallCount, embedding, linkedMemories, source, context
+      recallCount, embedding, embeddingModel, embeddingDim, embeddingUpdatedAt,
+      linkedMemories, source, context
     ) VALUES (
       @id, @chatId, @content, @category, @importance, @emotionalWeight,
       @tags, @memoryTime, @createdAt, @updatedAt, @lastRecalled,
-      @recallCount, @embedding, @linkedMemories, @source, @context
+      @recallCount, @embedding, @embeddingModel, @embeddingDim, @embeddingUpdatedAt,
+      @linkedMemories, @source, @context
     )
   `);
 
@@ -177,6 +202,32 @@ function getMemoryStats() {
     ORDER BY category
   `).all();
 
+  const byEmbeddingModel = db.prepare(`
+    SELECT
+      COALESCE(NULLIF(embeddingModel, ''), 'unknown') AS model,
+      COUNT(*) AS count
+    FROM memories
+    WHERE embedding IS NOT NULL
+      AND embedding != ''
+      AND embedding != 'null'
+      AND embedding != '[]'
+    GROUP BY COALESCE(NULLIF(embeddingModel, ''), 'unknown')
+    ORDER BY count DESC
+  `).all();
+
+  const byEmbeddingDim = db.prepare(`
+    SELECT
+      COALESCE(embeddingDim, 0) AS dim,
+      COUNT(*) AS count
+    FROM memories
+    WHERE embedding IS NOT NULL
+      AND embedding != ''
+      AND embedding != 'null'
+      AND embedding != '[]'
+    GROUP BY COALESCE(embeddingDim, 0)
+    ORDER BY count DESC
+  `).all();
+
   const withEmbedding = db.prepare(`
     SELECT COUNT(*) AS count
     FROM memories
@@ -209,6 +260,8 @@ function getMemoryStats() {
   return {
     total,
     byCategory,
+    byEmbeddingModel,
+    byEmbeddingDim,
     withEmbedding,
     withoutEmbedding,
     important,
