@@ -200,8 +200,20 @@ async function backupSqliteDb() {
     await db.backup(latestBackupFile);
 
     console.log('[memory-server] 已备份 memory.db:', backupFile);
+
+    return {
+      ok: true,
+      backupFile,
+      latestBackupFile,
+      timestamp
+    };
   } catch (error) {
-    console.warn('[memory-server] 备份 memory.db 失败，继续写入:', error.message);
+    console.warn('[memory-server] 备份 memory.db 失败:', error.message);
+
+    return {
+      ok: false,
+      error: error.message
+    };
   }
 }
 
@@ -321,6 +333,27 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, 400, {
         ok: false,
         error: error.message
+      });
+    }
+
+    return;
+  }
+
+  if (pathname === '/memory/backup' && req.method === 'POST') {
+    const result = await backupSqliteDb();
+
+    if (result.ok) {
+      sendJson(res, 200, {
+        ok: true,
+        message: 'SQLite memory database backed up.',
+        backupFile: result.backupFile,
+        latestBackupFile: result.latestBackupFile,
+        timestamp: result.timestamp
+      });
+    } else {
+      sendJson(res, 500, {
+        ok: false,
+        error: result.error || 'Backup failed'
       });
     }
 
