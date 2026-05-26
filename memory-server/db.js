@@ -108,21 +108,49 @@ function addMemory(memory) {
   return normalizeMemory(db.prepare('SELECT * FROM memories WHERE id = ?').get(item.id));
 }
 
-function listMemories(chatId) {
-  let rows;
-
-  if (chatId) {
-    rows = db.prepare(`
-      SELECT * FROM memories
-      WHERE chatId = ?
-      ORDER BY CAST(memoryTime AS INTEGER) DESC, CAST(createdAt AS INTEGER) DESC
-    `).all(chatId);
-  } else {
-    rows = db.prepare(`
-      SELECT * FROM memories
-      ORDER BY CAST(memoryTime AS INTEGER) DESC, CAST(createdAt AS INTEGER) DESC
-    `).all();
+function listMemories(filters = {}) {
+  if (typeof filters === 'string') {
+    filters = { chatId: filters };
   }
+
+  const params = [];
+  const where = [];
+
+  if (filters.chatId) {
+    where.push('chatId = ?');
+    params.push(String(filters.chatId));
+  }
+
+  if (filters.category) {
+    where.push('category = ?');
+    params.push(String(filters.category).trim().toUpperCase());
+  }
+
+  if (filters.minImportance !== undefined && filters.minImportance !== null && filters.minImportance !== '') {
+    where.push('importance >= ?');
+    params.push(Number(filters.minImportance));
+  }
+
+  if (filters.maxImportance !== undefined && filters.maxImportance !== null && filters.maxImportance !== '') {
+    where.push('importance <= ?');
+    params.push(Number(filters.maxImportance));
+  }
+
+  if (filters.query) {
+    where.push('(content LIKE ? OR tags LIKE ? OR context LIKE ? OR source LIKE ?)');
+    const q = `%${String(filters.query).trim()}%`;
+    params.push(q, q, q, q);
+  }
+
+  const safeLimit = Math.min(1000, Math.max(1, Number(filters.limit) || 500));
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+  const rows = db.prepare(`
+    SELECT * FROM memories
+    ${whereSql}
+    ORDER BY CAST(memoryTime AS INTEGER) DESC, CAST(createdAt AS INTEGER) DESC
+    LIMIT ?
+  `).all(...params, safeLimit);
 
   return rows.map(normalizeMemory);
 }

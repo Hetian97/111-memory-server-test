@@ -233,11 +233,23 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (pathname === '/memory/list' && req.method === 'GET') {
-    const memories = listMemories();
+    const url = new URL(req.url, `http://${req.headers.host}`);
+
+    const filters = {
+      chatId: url.searchParams.get('chatId') || '',
+      category: url.searchParams.get('category') || '',
+      minImportance: url.searchParams.get('minImportance') || '',
+      maxImportance: url.searchParams.get('maxImportance') || '',
+      query: url.searchParams.get('query') || '',
+      limit: url.searchParams.get('limit') || 500
+    };
+
+    const memories = listMemories(filters);
 
     sendJson(res, 200, {
       ok: true,
       count: memories.length,
+      filters,
       memories
     });
     return;
