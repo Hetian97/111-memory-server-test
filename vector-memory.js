@@ -1055,7 +1055,8 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
       vm.uiFilters = {
         category: 'ALL',
         vectorStatus: 'ALL',
-        minImportance: 'ALL'
+        minImportance: 'ALL',
+        searchText: ''
       };
     }
 
@@ -1517,6 +1518,7 @@ getFilteredFragments(fragments, filters) {
   const category = filters?.category || 'ALL';
   const vectorStatus = filters?.vectorStatus || 'ALL';
   const minImportance = filters?.minImportance || 'ALL';
+  const searchText = String(filters?.searchText || '').trim().toLowerCase();
 
   return (fragments || []).filter(fragment => {
     if (category !== 'ALL' && fragment.category !== category) {
@@ -1540,6 +1542,20 @@ getFilteredFragments(fragments, filters) {
       }
     }
 
+    if (searchText) {
+      const searchableText = [
+        fragment.content || '',
+        fragment.category || '',
+        Array.isArray(fragment.tags) ? fragment.tags.join(' ') : '',
+        fragment.source || '',
+        fragment.context || ''
+      ].join(' ').toLowerCase();
+
+      if (!searchableText.includes(searchText)) {
+        return false;
+      }
+    }
+
     return true;
   });
 }
@@ -1548,7 +1564,8 @@ renderMemoryFilterBar(chat, vm) {
   const filters = vm.uiFilters || {
     category: 'ALL',
     vectorStatus: 'ALL',
-    minImportance: 'ALL'
+    minImportance: 'ALL',
+    searchText: ''
   };
 
   const categories = this.getCategories(chat);
@@ -1575,6 +1592,16 @@ renderMemoryFilterBar(chat, vm) {
   `;
 
   wrap.innerHTML = `
+    <label style="font-size:12px;color:#666;">搜索</label>
+    <input
+      id="vm-filter-search"
+      class="vm-filter-input"
+      type="text"
+      value="${this._escapeHtml(filters.searchText || '')}"
+      placeholder="输入后按回车或点搜索"
+      style="min-width:180px; flex:1; padding:5px 8px; border-radius:8px; border:1px solid #ddd;"
+    >
+    <button id="vm-filter-search-btn" class="vm-btn-secondary" style="padding:5px 10px;">搜索</button>
     <label style="font-size:12px;color:#666;">分类</label>
     <select id="vm-filter-category" class="vm-filter-select" style="padding:5px 8px;border-radius:8px;border:1px solid #ddd;">
       <option value="ALL" ${filters.category === 'ALL' ? 'selected' : ''}>全部</option>
@@ -1618,11 +1645,29 @@ renderMemoryFilterBar(chat, vm) {
     this.updateMemoryFilters(chat, { minImportance: e.target.value }, wrap.parentElement);
   });
 
+  const searchInput = wrap.querySelector('#vm-filter-search');
+
+  wrap.querySelector('#vm-filter-search-btn')?.addEventListener('click', () => {
+    this.updateMemoryFilters(chat, {
+      searchText: searchInput?.value || ''
+    }, wrap.parentElement);
+  });
+
+  searchInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      this.updateMemoryFilters(chat, {
+        searchText: searchInput.value || ''
+      }, wrap.parentElement);
+    }
+  });
+
   wrap.querySelector('#vm-filter-reset')?.addEventListener('click', () => {
     this.updateMemoryFilters(chat, {
       category: 'ALL',
       vectorStatus: 'ALL',
-      minImportance: 'ALL'
+      minImportance: 'ALL',
+      searchText: ''
     }, wrap.parentElement);
   });
 
@@ -1636,7 +1681,8 @@ updateMemoryFilters(chat, patch, container = null) {
     ...(vm.uiFilters || {
       category: 'ALL',
       vectorStatus: 'ALL',
-      minImportance: 'ALL'
+      minImportance: 'ALL',
+      searchText: ''
     }),
     ...patch
   };
