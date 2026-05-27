@@ -10,3 +10,4 @@ memory-server/backups/
 memory-server/memory.backup.json
 memory-server/node_modules/
 memory-server/server.json-version.backup.js
+start-111-tailscale-local.bat
