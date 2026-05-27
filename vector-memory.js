@@ -916,8 +916,19 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
 
   // 批量删除
   batchDelete(chat, selectedItems) {
-    const vm = this.getVariableMemory(chat);
-    const deletedIds = [];
+    const count = Array.isArray(selectedItems) ? selectedItems.length : 0;
+
+    const confirmText = prompt(
+      `此操作会删除选中的 ${count} 条记忆，并且如果已启用外部 memory-server，也会同步删除 SQLite 中的记录。\n\n请输入 DELETE 确认删除：`
+    );
+
+    if (confirmText !== 'DELETE') {
+      alert('已取消删除。');
+      return false;
+    }
+
+  const vm = this.getVariableMemory(chat);
+  const deletedIds = [];
 
     for (const item of selectedItems) {
       if (item.type === 'fragment') {
@@ -1152,6 +1163,16 @@ async searchExternalMemoryServer(chat, queryText, topN = 10) {
       frags.forEach(frag => {
         const row = document.createElement('div');
         row.className = 'vm-item-row';
+        row.dataset.category = frag.category || '';
+        row.dataset.importance = String(frag.importance || 0);
+        row.dataset.vectorStatus = frag.embedding ? 'VECTOR' : 'BM25';
+        row.dataset.searchText = [
+          frag.content || '',
+          frag.category || '',
+          Array.isArray(frag.tags) ? frag.tags.join(' ') : '',
+          frag.source || '',
+          frag.context || ''
+        ].join(' ').toLowerCase();
         
         let rawTime = Number(frag.memoryTime || frag.createdAt || Date.now());
 
@@ -1663,6 +1684,16 @@ renderMemoryFilterBar(chat, vm) {
   });
 
   wrap.querySelector('#vm-filter-reset')?.addEventListener('click', () => {
+    const searchInput = wrap.querySelector('#vm-filter-search');
+    const categorySelect = wrap.querySelector('#vm-filter-category');
+    const vectorSelect = wrap.querySelector('#vm-filter-vector');
+    const importanceSelect = wrap.querySelector('#vm-filter-importance');
+
+    if (searchInput) searchInput.value = '';
+    if (categorySelect) categorySelect.value = 'ALL';
+    if (vectorSelect) vectorSelect.value = 'ALL';
+    if (importanceSelect) importanceSelect.value = 'ALL';
+
     this.updateMemoryFilters(chat, {
       category: 'ALL',
       vectorStatus: 'ALL',
@@ -1687,18 +1718,91 @@ updateMemoryFilters(chat, patch, container = null) {
     ...patch
   };
 
-  if (container) {
-    this.renderMemoryUI(chat, container);
-    return;
-  }
+  this.applyMemoryFiltersToDom(container || document);
+}
 
-  const panel =
-    document.querySelector('.vm-panel-content') ||
-    document.querySelector('.vm-content') ||
-    document.querySelector('.vm-container');
+applyMemoryFiltersToDom(root = document) {
+  const panelRoot = root || document;
 
-  if (panel) {
-    this.renderMemoryUI(chat, panel);
+  const categorySelect = panelRoot.querySelector?.('#vm-filter-category') || document.querySelector('#vm-filter-category');
+  const vectorSelect = panelRoot.querySelector?.('#vm-filter-vector') || document.querySelector('#vm-filter-vector');
+  const importanceSelect = panelRoot.querySelector?.('#vm-filter-importance') || document.querySelector('#vm-filter-importance');
+  const searchInput = panelRoot.querySelector?.('#vm-filter-search') || document.querySelector('#vm-filter-search');
+
+  const category = categorySelect?.value || 'ALL';
+  const vectorStatus = vectorSelect?.value || 'ALL';
+  const minImportance = importanceSelect?.value || 'ALL';
+  const searchText = String(searchInput?.value || '').trim().toLowerCase();
+
+  const sections = panelRoot.querySelectorAll?.('.vm-section') || document.querySelectorAll('.vm-section');
+
+  sections.forEach(section => {
+    const rows = section.querySelectorAll('.vm-item-row');
+    let visibleCount = 0;
+
+    rows.forEach(row => {
+      const rowCategory = row.dataset.category || '';
+      const rowVectorStatus = row.dataset.vectorStatus || 'BM25';
+      const rowImportance = Number(row.dataset.importance || 0);
+      const rowSearchText = row.dataset.searchText || '';
+
+      let visible = true;
+
+      if (category !== 'ALL' && rowCategory !== category) {
+        visible = false;
+      }
+
+      if (vectorStatus !== 'ALL' && rowVectorStatus !== vectorStatus) {
+        visible = false;
+      }
+
+      if (minImportance !== 'ALL') {
+        const min = Number(minImportance);
+        if (Number.isFinite(min) && rowImportance < min) {
+          visible = false;
+        }
+      }
+
+      if (searchText && !rowSearchText.includes(searchText)) {
+        visible = false;
+      }
+
+      row.style.display = visible ? '' : 'none';
+
+      if (visible) visibleCount++;
+    });
+
+    section.style.display = visibleCount > 0 ? '' : 'none';
+
+    const countEl = section.querySelector('.vm-section-count');
+    if (countEl) countEl.textContent = String(visibleCount);
+  });
+
+  const listContainer =
+    panelRoot.querySelector?.('.vm-list-container') ||
+    document.querySelector('.vm-list-container');
+
+  if (listContainer) {
+    const anyVisible = Array.from(listContainer.querySelectorAll('.vm-section'))
+      .some(section => section.style.display !== 'none');
+
+    let emptyEl = listContainer.querySelector('.vm-filter-empty-message');
+
+    if (!anyVisible) {
+      if (!emptyEl) {
+        emptyEl = document.createElement('div');
+        emptyEl.className = 'vm-filter-empty-message';
+        emptyEl.style.cssText = 'text-align:center; color:#999; padding:40px 20px;';
+        emptyEl.innerHTML = `
+          <p style="font-size:16px;font-weight:bold;color:#666;">当前筛选条件下没有记忆</p>
+          <p style="font-size:13px;margin-top:5px;">可以调整搜索词、分类、向量状态或重要度筛选。</p>
+        `;
+        listContainer.appendChild(emptyEl);
+      }
+      emptyEl.style.display = '';
+    } else if (emptyEl) {
+      emptyEl.style.display = 'none';
+    }
   }
 }
 
@@ -1848,7 +1952,124 @@ showFragmentDetail(fragment) {
     `关联记忆 linkedMemories：${linkedMemories}`
   ].join('\n');
 
-  alert(detailText);
+  this.showMemoryDetailModal(detailText);
+}
+
+showMemoryDetailModal(detailText) {
+  const oldModal = document.getElementById('vm-memory-detail-modal');
+  if (oldModal) oldModal.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'vm-memory-detail-modal';
+  modal.style.cssText = `
+    position: fixed;
+    inset: 0;
+    z-index: 999999;
+    background: rgba(0,0,0,0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    box-sizing: border-box;
+  `;
+
+  modal.innerHTML = `
+    <div
+      style="
+        width: min(720px, 96vw);
+        max-height: 86vh;
+        background: #fff;
+        color: #222;
+        border-radius: 16px;
+        box-shadow: 0 18px 50px rgba(0,0,0,0.25);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      "
+    >
+      <div
+        style="
+          display:flex;
+          align-items:center;
+          justify-content:space-between;
+          gap:12px;
+          padding:14px 16px;
+          border-bottom:1px solid rgba(0,0,0,0.08);
+        "
+      >
+        <div style="font-size:16px;font-weight:700;">记忆详情</div>
+        <button
+          id="vm-memory-detail-close"
+          style="
+            border:none;
+            background:transparent;
+            font-size:22px;
+            line-height:1;
+            cursor:pointer;
+            padding:4px 8px;
+          "
+        >×</button>
+      </div>
+
+      <pre
+        id="vm-memory-detail-text"
+        style="
+          margin:0;
+          padding:16px;
+          white-space:pre-wrap;
+          word-break:break-word;
+          overflow:auto;
+          max-height:62vh;
+          font-size:13px;
+          line-height:1.6;
+          font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+          background:rgba(0,0,0,0.02);
+        "
+      ></pre>
+
+      <div
+        style="
+          display:flex;
+          justify-content:flex-end;
+          gap:8px;
+          padding:12px 16px;
+          border-top:1px solid rgba(0,0,0,0.08);
+        "
+      >
+        <button id="vm-memory-detail-copy" class="vm-btn-secondary" style="padding:6px 12px;">复制详情</button>
+        <button id="vm-memory-detail-ok" class="vm-btn-secondary" style="padding:6px 12px;">关闭</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+
+  const textEl = modal.querySelector('#vm-memory-detail-text');
+  if (textEl) textEl.textContent = detailText;
+
+  const close = () => modal.remove();
+
+  modal.querySelector('#vm-memory-detail-close')?.addEventListener('click', close);
+  modal.querySelector('#vm-memory-detail-ok')?.addEventListener('click', close);
+
+  modal.addEventListener('click', (event) => {
+    if (event.target === modal) close();
+  });
+
+  modal.querySelector('#vm-memory-detail-copy')?.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(detailText);
+      const btn = modal.querySelector('#vm-memory-detail-copy');
+      if (btn) {
+        btn.textContent = '已复制';
+        setTimeout(() => {
+          btn.textContent = '复制详情';
+        }, 1200);
+      }
+    } catch (error) {
+      alert('复制失败，请手动选中文本复制。');
+    }
+  });
 }
 
   _escapeHtml(text) {

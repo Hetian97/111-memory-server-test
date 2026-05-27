@@ -696,10 +696,16 @@ function bindVectorMemoryEvents(chat, container) {
       if (vmSelectedItems.length === 0) { showToast('请先选择条目', 'info'); return; }
       const confirmed = await showCustomConfirm('确认批量删除', `确定要删除选中的 ${vmSelectedItems.length} 条记忆吗？此操作不可撤销。`, { confirmButtonClass: 'btn-danger', confirmText: '确认删除' });
       if (confirmed) {
-        window.vectorMemoryManager.batchDelete(chat, vmSelectedItems);
+        const deleteCount = vmSelectedItems.length;
+        const deleted = window.vectorMemoryManager.batchDelete(chat, vmSelectedItems);
+
+        if (!deleted) {
+          return;
+        }
+
         await db.chats.put(chat);
         renderVectorMemoryView();
-        showToast(`已删除 ${vmSelectedItems.length} 条记忆`, 'success');
+        showToast(`已删除 ${deleteCount} 条记忆`, 'success');
       }
     });
   }
